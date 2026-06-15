@@ -61,18 +61,32 @@ This is less reliable because text search does not understand C# symbols, overlo
 
 [Notes on setting up your local development environment - challenges you faced, how you solved them]
 
-### Steps to Reproduce
+### Steps to Reproduce / Explore Current Functionality
 
-1. [Step 1]
-2. [Step 2]
-3. [Observed result]
+1. Built the RoslynMcp server locally to confirm the development environment works.
+2. Ran the published server with `./publish/net8.0/RoslynMcp --version` to confirm the MCP executable starts successfully.
+3. Reviewed the existing analysis tools under `src/RoslynMcp/Tools/Analysis/`.
+4. Confirmed that similar semantic tools already exist, including `roslyn_find_references`, `roslyn_find_callers`, `roslyn_get_call_graph`, and `roslyn_get_type_members`.
+5. Searched the codebase for `roslyn_find_unused`, `roslyn_get_type_dependencies`, and `roslyn_find_overloads`.
+6. Confirmed that these tools are mentioned in planning docs but are not currently implemented as MCP tools.
+
+### Observed Result
+
+The project already has the architecture needed for semantic C# analysis tools, but the three requested tools are missing from the implementation.
 
 ### Reproduction Evidence
 
-- **Commit showing reproduction:** [Link to commit in your fork]
+- **Commit showing reproduction:** N/A - This is not a reproducible bug but a feature. 
 - **Screenshots/logs:** [If applicable]
-- **My findings:** [What you discovered during reproduction]
+- **My findings:**
+This is a feature gap rather than a runtime bug. Existing tools demonstrate the implementation pattern:
 
+- `FindReferencesTool.cs` shows how to use `SymbolFinder.FindReferencesAsync`.
+- `TypeMembersTool.cs` shows how to resolve a type and inspect members.
+- `GetCallGraphTool.cs` shows how to inspect semantic dependencies using Roslyn.
+- `FindCallersTool.cs` shows async Roslyn lookup and structured/paged results.
+
+The new tools should follow these existing patterns.
 ---
 
 ## Solution Approach
