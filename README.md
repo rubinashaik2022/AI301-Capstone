@@ -17,19 +17,41 @@ I chose this issue because it connects directly to my interest in AI developer t
 
 ### Problem Description
 
-[In your own words, what's broken or missing?]
+Currently, agents often rely on grep or keyword matching to understand C# code, which is limited because text search does not understand symbols, overloads, references, or type relationships. RoslynMcp gives AI agents compiler-backed tools so they can reason about code semantically instead of matching strings.
+
+This issue involves implementing three new semantic analysis tools:
+
+- `roslyn_find_unused`: finds private/internal symbols that have no references and may be safe dead-code cleanup candidates.
+- `roslyn_get_type_dependencies`: given a type, returns the other types it directly depends on, such as base types, interfaces, field types, property types, method return types, parameter types, and generic constraints.
+- `roslyn_find_overloads`: given a method name and containing type, returns all overloads with their full method signatures.
+
+Together, these tools help agents understand unused code, type coupling, and overloaded methods before making refactoring or editing decisions.
 
 ### Expected Behavior
 
-[What should happen?]
+AI agents should be able to use RoslynMcp to answer these semantic C# questions directly:
+
+- Which private/internal symbols are unused?
+- What types does a given type directly depend on?
+- What overloads exist for a method on a containing type?
+
+The system should provide dedicated tools for these questions: `roslyn_find_unused`, `roslyn_get_type_dependencies`, and `roslyn_find_overloads`.
 
 ### Current Behavior
 
-[What actually happens?]
+These dedicated tools do not currently exist. Agents must approximate the answers using grep, keyword search, file reads, or combinations of existing broader tools like `roslyn_find_references` and `roslyn_get_type_members`.
+
+This is less reliable because text search does not understand C# symbols, overloads, inheritance, interfaces, or type relationships.
 
 ### Affected Components
 
-[Which parts of the codebase are involved?]
+- `src/RoslynMcp/Tools/Analysis/` — where the new analysis tools should be implemented
+- `src/RoslynMcp/Tools/RoslynMcpTool.cs` — shared helper patterns for resolving compilations and symbols
+- `src/RoslynMcp/Tools/ToolResults.cs` — structured result types, if shared result records are added
+- `src/TestHarness/Tests/` — tests for the new tool behavior
+- `README.md` — tool catalog documentation
+- `docs/AGENT-INSTRUCTIONS.md` — agent guidance for when to use the new tools
+- `docs/plans/tool-suggestions.md` and `ROADMAP.md` — planning/status documentation
 
 ---
 
