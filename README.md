@@ -54,12 +54,29 @@ This is less reliable because text search does not understand C# symbols, overlo
 - `docs/plans/tool-suggestions.md` and `ROADMAP.md` — planning/status documentation
 
 ---
-
 ## Reproduction Process
 
 ### Environment Setup
 
-[Notes on setting up your local development environment - challenges you faced, how you solved them]
+I cloned my fork locally:
+
+`https://github.com/rubinashaik2022/RoslynMcp.git`
+
+Local path:
+
+`/Users/rubinashaik/RoslynMcp`
+
+Working branch:
+
+`issue-19-semantic-analysis-tools`
+
+I built the MCP server locally using `net8.0` because my machine has .NET 8/9 installed, but not .NET 10. The README shows a `net10.0` publish example, so I adjusted the target framework for my local environment.
+
+Commands used:
+
+dotnet restore src/RoslynMcp/RoslynMcp.csproj -p:TargetFrameworks=net8.0 -r osx-arm64
+dotnet restore src/RoslynMcp.Analyzers/RoslynMcp.Analyzers.csproj
+dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net8.0 -o ./publish/net8.0 -p:TargetFrameworks=net8.0 --no-restorel 
 
 ### Steps to Reproduce / Explore Current Functionality
 
@@ -89,34 +106,136 @@ This is a feature gap rather than a runtime bug. Existing tools demonstrate the 
 The new tools should follow these existing patterns.
 ---
 
-## Solution Approach
+## Solution Plan
 
-### Analysis
+### Understand
 
-[Your analysis of the root cause - what's causing the issue?]
+Add independent Roslyn-backed tools that follow existing tool conventions. Each tool should be read-only, idempotent, structured, and token-efficient.
 
-### Proposed Solution
+### Match
 
-[High-level description of your fix approach]
+Use these existing tools as implementation references:
 
-### Implementation Plan
+- `FindReferencesTool.cs` for symbol reference lookup
+- `FindCallersTool.cs` for async semantic lookup and result paging
+- `GetCallGraphTool.cs` for dependency-style semantic traversal
+- `TypeMembersTool.cs` for type resolution and member enumeration
 
-Using UMPIRE framework (adapted):
+### Plan
 
-**Understand:** [Restate the problem]
+1. Implement `roslyn_find_unused`
 
-**Match:** [What similar patterns/solutions exist in the codebase?]
+   Find private/internal symbols with zero references.
 
-**Plan:** [Step-by-step implementation plan]
-1. [Modify file X to do Y]
-2. [Add function Z]
-3. [Update tests]
+   Suggested logic:
 
-**Implement:** [Link to your branch/commits as you work]
+   - Enumerate source-declared private/internal types and members.
+   - Exclude implicitly declared members, generated accessors, constructors unless intentionally supported, overrides, interface implementations, and public API.
+   - Use `SymbolFinder.FindReferencesAsync` for each candidate.
+   - Return only candidates with no reference locations outside the declaration.
 
-**Review:** [Self-review checklist - does it follow the project's contribution guidelines?]
+  Result fields:
 
-**Evaluate:** [How will you verify it works?]
+   - `name`
+   - `kind`
+   - `signature`
+   - `accessibility`
+   - `file`
+   - `line`
+
+2. Implement `roslyn_get_type_dependencies`
+
+   Given a type, return directly referenced types.
+
+   Logic:
+
+   - Resolve the type using the same pattern as `TypeMembersTool`.
+   - Collect dependencies from base type, interfaces, fields, properties, method return types, method parameters, generic arguments, and generic constraints.
+   - Deduplicate with `SymbolEqualityComparer.Default`.
+   - Exclude the containing type itself.
+
+   Suggested result fields:
+
+   - `typeName`
+   - `totalDependencies`
+   - `dependencies`
+   - each dependency: `name`, `namespace`, `kind`, `source`, `reason`
+
+3. Implement `roslyn_find_overloads`
+
+   Given a method name and containing type, return all overloads.
+
+   Logic:
+
+   - Require `containingType`.
+   - Resolve the containing type.
+   - Filter `GetMembers(methodName)` to `IMethodSymbol`.
+   - Exclude property/event accessors and implicitly declared methods.
+   - Format signatures with `SymbolFormatter.FormatMethod`.
+
+   Suggested result fields:
+
+   - `containingType`
+   - `methodName`
+   - `totalOverloads`
+   - `overloads`
+   - each overload: `signature`, `returnType`, `parameters`, `accessibility`, `isStatic`, `isGeneric`, `file`, `line`
+
+4. Add tests
+
+   Cover these minimum cases:
+
+   - `roslyn_find_unused` reports unused private members.
+   - `roslyn_find_unused` does not report referenced private members.
+   - `roslyn_get_type_dependencies` reports dependencies from fields, parameters, return types, base type, and interfaces.
+   - `roslyn_find_overloads` returns all overloads for a method and excludes unrelated methods.
+
+5. Update docs
+
+   After implementation, update:
+
+   - `README.md` Tool Catalog
+   - `docs/AGENT-INSTRUCTIONS.md`
+   - `ROADMAP.md`
+   - `docs/plans/tool-suggestions.md`
+
+### Review
+
+Check that the new tools:
+
+- Use the `roslyn_*` naming convention.
+- Are marked read-only and idempotent.
+- Use `TryGetCompilation`.
+- Return structured result records.
+- Use project-relative file paths.
+- Page large result sets.
+- Avoid text search for semantic questions.
+- Include useful tool descriptions that tell agents when to use them.
+
+### Evaluate
+
+Run:
+
+```bash
+dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net8.0 -o ./publish/net8.0 -p:TargetFrameworks=net8.0
+```
+
+Then manually smoke-test against a small C# sample project:
+
+- A deliberately unused private method appears in `roslyn_find_unused`.
+- A referenced private method does not appear in `roslyn_find_unused`.
+- A type with fields, parameters, return types, base type, and interfaces returns expected dependencies.
+- A method with multiple overloads returns every overload signature.
+
+## Clarification
+
+Some older text refers to "four new analysis tools." In the current repository state, three related tools remain unshipped:
+
+- `roslyn_find_unused`
+- `roslyn_get_type_dependencies`
+- `roslyn_find_overloads`
+
+`roslyn_check_syntax` appears to have been part of the earlier suggestion set, but it has already shipped in v0.8.0-beta.
 
 ---
 
