@@ -93,7 +93,8 @@ The project already has the architecture needed for semantic C# analysis tools, 
 
 ### Reproduction Evidence
 
-- **Commit showing reproduction:** N/A - This is not a reproducible bug but a feature. 
+- **Commit showing reproduction:** N/A - This is not a reproducible bug but a feature.
+- Branch link: https://github.com/rubinashaik2022/RoslynMcp/tree/issue-19-semantic-analysis-tools
 - **Screenshots/logs:** [If applicable]
 - **My findings:**
 This is a feature gap rather than a runtime bug. Existing tools demonstrate the implementation pattern:
