@@ -242,16 +242,50 @@ Some older text refers to "four new analysis tools." In the current repository s
 
 ## Testing Strategy
 
-### Unit Tests
+#### Integration Testing
 
-- [ ] Test case 1: [Description]
-- [ ] Test case 2: [Description]
-- [ ] Test case 3: [Description]
+The new `roslyn_find_overloads` tool was tested through the project's existing `TestHarness`. These tests exercise the real MCP server rather than calling the tool method directly.
+
+For each test, the harness:
+
+1. Builds and starts the RoslynMcp server as a child process.
+2. Opens an MCP session through the server's standard input and output streams.
+3. Sends a JSON-RPC `tools/call` request for `roslyn_find_overloads`.
+4. Provides a real project path, containing type, and method name.
+5. The tool loads the project into a Roslyn `Compilation`.
+6. It resolves the containing type and finds matching overloads.
+7. The server serializes the result into JSON and returns it through MCP.
+8. The test harness parses and validates the returned JSON.
+
+The integration tests cover:
+
+- Finding multiple overloads with the same method name.
+- Preserving generic type parameters such as `<T>`.
+- Preserving nullable annotations such as `string?`.
+- Preserving optional/default parameter values such as `= null`.
+- Preserving `out` parameter modifiers.
+- Resolving fully qualified containing type names.
+- Returning an empty overload list when the method does not exist.
 
 ### Integration Tests
 
-- [ ] Integration scenario 1
-- [ ] Integration scenario 2
+- **Multiple overloads:** Calls `roslyn_find_overloads` for `RoslynMcpTool.BeginTool` and confirms that both overloads are returned.
+
+- **Full method signatures:** Confirms that the returned signatures preserve:
+  - Generic type parameters such as `<T>`
+  - Nullable markers such as `string?`
+  - Default values such as `subject = null`
+
+  In C#, `string?` means that the value may be `null`. The parameter is optional because it has a default value.
+
+- **Fully qualified type name:** Calls the tool using `RoslynMcp.Tools.RoslynMcpTool` instead of the shorter `RoslynMcpTool` name and confirms that the type still resolves correctly.
+
+- **`out` parameters:** Calls the tool for `TryGetCompilation` and confirms that its signature preserves `out Compilation? compilation` and `out ToolResult? error`. An `out` parameter is assigned by the method and returned to the caller.
+
+- **`ref` parameters:** Calls the tool for a method such as `Paginate` and confirms that `ref int skip` is preserved. A `ref` parameter allows the method to read and modify the caller's existing variable.
+
+- **Missing method:** Requests a method that does not exist and confirms that the tool returns zero overloads and an empty list instead of failing.
+
 
 ### Manual Testing
 
