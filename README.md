@@ -1,15 +1,17 @@
-# Contribution [#1]: Implement roslyn_find_unused and supporting analysis tools
+# Contribution [#1]: Implement `roslyn_find_unused` and Supporting Analysis Tools
 
-**Contribution Number:** 1
-**Student:** Rubina Shaik
-**Issue:** https://github.com/MadQ/RoslynMcp/issues/33
+**Contribution Number:** 1  
+**Student:** Rubina Shaik  
+**Issue:** https://github.com/MadQ/RoslynMcp/issues/33  
 **Status:** Phase II completed
 
 ---
 
 ## Why I Chose This Issue
 
-I chose this issue because it connects directly to my interest in AI developer tools and Model Context Protocol (MCP), which is an area I expect to work with in my upcoming job. RoslynMcp is a good fit because it already has an MCP server in place, so the project is focused on adding a useful new tool rather than building the entire system from scratch. The `roslyn_find_unused` tool would help AI coding agents inspect C# projects more intelligently by finding private or internal symbols with no references. I also think the scope is appropriate for a 3-4 week project because it includes learning the existing MCP tool structure, refreshing my C# knowledge, implementing the tool, adding tests, documenting the behavior, and responding to review feedback.
+I chose this issue because it connects directly to my interest in AI developer tools and Model Context Protocol (MCP), which is an area I expect to work with in my upcoming job. RoslynMcp is a good fit because it already has an MCP server in place, so the project is focused on adding useful tools rather than building the entire system from scratch.
+
+The `roslyn_find_unused` tool would help AI coding agents inspect C# projects more intelligently by finding private or internal symbols with no references. I also think the scope is appropriate for a 3-4 week project because it includes learning the existing MCP tool structure, refreshing my C# knowledge, implementing the tools, adding tests, documenting behavior, and responding to review feedback.
 
 ---
 
@@ -17,7 +19,7 @@ I chose this issue because it connects directly to my interest in AI developer t
 
 ### Problem Description
 
-Currently, agents often rely on grep or keyword matching to understand C# code, which is limited because text search does not understand symbols, overloads, references, or type relationships. RoslynMcp gives AI agents compiler-backed tools so they can reason about code semantically instead of matching strings.
+Currently, agents often rely on grep or keyword matching to understand C# code. This is limited because text search does not understand symbols, overloads, references, or type relationships. RoslynMcp gives AI agents compiler-backed tools so they can reason about code semantically instead of matching strings.
 
 This issue involves implementing three new semantic analysis tools:
 
@@ -39,44 +41,53 @@ The system should provide dedicated tools for these questions: `roslyn_find_unus
 
 ### Current Behavior
 
-These dedicated tools do not currently exist. Agents must approximate the answers using grep, keyword search, file reads, or combinations of existing broader tools like `roslyn_find_references` and `roslyn_get_type_members`.
+At the start of this contribution, these dedicated tools did not exist. Agents had to approximate the answers using grep, keyword search, file reads, or combinations of existing broader tools like `roslyn_find_references` and `roslyn_get_type_members`.
 
 This is less reliable because text search does not understand C# symbols, overloads, inheritance, interfaces, or type relationships.
 
 ### Affected Components
 
-- `src/RoslynMcp/Tools/Analysis/` — where the new analysis tools should be implemented
-- `src/RoslynMcp/Tools/RoslynMcpTool.cs` — shared helper patterns for resolving compilations and symbols
-- `src/RoslynMcp/Tools/ToolResults.cs` — structured result types, if shared result records are added
-- `src/TestHarness/Tests/` — tests for the new tool behavior
-- `README.md` — tool catalog documentation
-- `docs/AGENT-INSTRUCTIONS.md` — agent guidance for when to use the new tools
-- `docs/plans/tool-suggestions.md` and `ROADMAP.md` — planning/status documentation
+- `src/RoslynMcp/Tools/Analysis/` - where the new analysis tools should be implemented
+- `src/RoslynMcp/Tools/RoslynMcpTool.cs` - shared helper patterns for resolving compilations and symbols
+- `src/RoslynMcp/Tools/ToolResults.cs` - structured result types, if shared result records are added
+- `src/TestHarness/Tests/` - tests for the new tool behavior
+- `README.md` - tool catalog documentation
+- `docs/AGENT-INSTRUCTIONS.md` - agent guidance for when to use the new tools
+- `docs/plans/tool-suggestions.md` and `ROADMAP.md` - planning/status documentation
 
 ---
+
 ## Reproduction Process
 
 ### Environment Setup
 
 I cloned my fork locally:
 
-`https://github.com/rubinashaik2022/RoslynMcp.git`
+```text
+https://github.com/rubinashaik2022/RoslynMcp.git
+```
 
 Local path:
 
-`/Users/rubinashaik/RoslynMcp`
+```text
+/Users/rubinashaik/RoslynMcp
+```
 
 Working branch:
 
-`issue-19-semantic-analysis-tools`
+```text
+issue-19-semantic-analysis-tools
+```
 
 I built the MCP server locally using `net8.0` because my machine has .NET 8/9 installed, but not .NET 10. The README shows a `net10.0` publish example, so I adjusted the target framework for my local environment.
 
 Commands used:
 
+```bash
 dotnet restore src/RoslynMcp/RoslynMcp.csproj -p:TargetFrameworks=net8.0 -r osx-arm64
 dotnet restore src/RoslynMcp.Analyzers/RoslynMcp.Analyzers.csproj
-dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net8.0 -o ./publish/net8.0 -p:TargetFrameworks=net8.0 --no-restorel 
+dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net8.0 -o ./publish/net8.0 -p:TargetFrameworks=net8.0 --no-restore
+```
 
 ### Steps to Reproduce / Explore Current Functionality
 
@@ -89,22 +100,20 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net8.0 -o ./publish/
 
 ### Observed Result
 
-The project already has the architecture needed for semantic C# analysis tools, but the three requested tools are missing from the implementation.
+The project already had the architecture needed for semantic C# analysis tools, but the three requested tools were missing from the implementation at the start of the contribution.
 
 ### Reproduction Evidence
 
-- **Commit showing reproduction:** N/A - This is not a reproducible bug but a feature.
-- Branch link: https://github.com/rubinashaik2022/RoslynMcp/tree/issue-19-semantic-analysis-tools
-- **Screenshots/logs:** [If applicable]
-- **My findings:**
-This is a feature gap rather than a runtime bug. Existing tools demonstrate the implementation pattern:
-
-- `FindReferencesTool.cs` shows how to use `SymbolFinder.FindReferencesAsync`.
-- `TypeMembersTool.cs` shows how to resolve a type and inspect members.
-- `GetCallGraphTool.cs` shows how to inspect semantic dependencies using Roslyn.
-- `FindCallersTool.cs` shows async Roslyn lookup and structured/paged results.
+- **Commit showing reproduction:** N/A - this is a feature gap rather than a reproducible bug.
+- **Branch link:** https://github.com/rubinashaik2022/RoslynMcp/tree/issue-19-semantic-analysis-tools
+- **My findings:** existing tools demonstrate the implementation pattern:
+  - `FindReferencesTool.cs` shows how to use `SymbolFinder.FindReferencesAsync`.
+  - `TypeMembersTool.cs` shows how to resolve a type and inspect members.
+  - `GetCallGraphTool.cs` shows how to inspect semantic dependencies using Roslyn.
+  - `FindCallersTool.cs` shows async Roslyn lookup and structured/paged results.
 
 The new tools should follow these existing patterns.
+
 ---
 
 ## Solution Plan
@@ -135,7 +144,7 @@ Use these existing tools as implementation references:
    - Use `SymbolFinder.FindReferencesAsync` for each candidate.
    - Return only candidates with no reference locations outside the declaration.
 
-  Result fields:
+   Result fields:
 
    - `name`
    - `kind`
@@ -230,7 +239,7 @@ Then manually smoke-test against a small C# sample project:
 
 ## Clarification
 
-Some older text refers to "four new analysis tools." In the current repository state, three related tools remain unshipped:
+Some older text refers to "four new analysis tools." For this contribution, the relevant issue scope is three related tools:
 
 - `roslyn_find_unused`
 - `roslyn_get_type_dependencies`
@@ -238,17 +247,17 @@ Some older text refers to "four new analysis tools." In the current repository s
 
 `roslyn_check_syntax` appears to have been part of the earlier suggestion set, but it has already shipped in v0.8.0-beta.
 
+Phase II completed `roslyn_get_type_dependencies` and `roslyn_find_overloads`. `roslyn_find_unused` remains planned.
+
 ---
 
 ## Testing Strategy
 
-# Testing
-
-## Integration Testing
+### Integration Testing
 
 Verified both projects compile and type-check with Roslyn MCP diagnostic/build tools.
 
-### `src/RoslynMcp/RoslynMcp.csproj`
+#### `src/RoslynMcp/RoslynMcp.csproj`
 
 ```text
 roslyn_get_diagnostics
@@ -260,7 +269,7 @@ roslyn_build_project
 Result: build succeeded
 ```
 
-### `src/TestHarness/TestHarness.csproj`
+#### `src/TestHarness/TestHarness.csproj`
 
 ```text
 roslyn_get_diagnostics
@@ -272,7 +281,7 @@ roslyn_build_project
 Result: build succeeded
 ```
 
-## End-to-End Testing
+### End-to-End Testing
 
 Ran the full MCP `TestHarness`:
 
@@ -298,11 +307,11 @@ All 82 tests passed
 
 The new and updated tools were exercised through the MCP protocol as part of the `Type Understanding Tools` group.
 
-## `roslyn_find_overloads` Coverage
+### `roslyn_find_overloads` Coverage
 
 The harness verifies that `roslyn_find_overloads` handles the following cases.
 
-### Simple Containing Type Name
+#### Simple Containing Type Name
 
 ```text
 containingType = "RoslynMcpTool"
@@ -310,7 +319,7 @@ containingType = "RoslynMcpTool"
 
 Verifies overload lookup works when the caller provides a simple type name.
 
-### Fully-Qualified Containing Type Name
+#### Fully-Qualified Containing Type Name
 
 ```text
 containingType = "RoslynMcp.Tools.RoslynMcpTool"
@@ -318,7 +327,7 @@ containingType = "RoslynMcp.Tools.RoslynMcpTool"
 
 Verifies overload lookup works when the caller provides a fully-qualified type name.
 
-### Multiple Overloads
+#### Multiple Overloads
 
 ```text
 methodName = "BeginTool"
@@ -326,7 +335,7 @@ methodName = "BeginTool"
 
 Verifies all overload signatures are returned.
 
-### Generic Method Signatures
+#### Generic Method Signatures
 
 ```text
 BeginTool<T>(...)
@@ -334,7 +343,7 @@ BeginTool<T>(...)
 
 Verifies generic overload signatures are included.
 
-### Optional/Default Parameter Values
+#### Optional/Default Parameter Values
 
 ```text
 string? subject = null
@@ -342,7 +351,7 @@ string? subject = null
 
 Verifies default parameter values are preserved in the returned signatures.
 
-### `out` Parameters
+#### `out` Parameters
 
 ```text
 out Compilation? compilation
@@ -351,7 +360,7 @@ out ToolResult? error
 
 Verifies `out` parameter modifiers are included in full signatures.
 
-### `ref` Parameters
+#### `ref` Parameters
 
 ```text
 ref int skip
@@ -359,7 +368,7 @@ ref int skip
 
 Verifies `ref` parameter modifiers are included in full signatures.
 
-### Missing Method
+#### Missing Method
 
 ```text
 methodName = "DefinitelyNotAMethod"
@@ -372,13 +381,13 @@ total_overloads == 0
 overloads is empty
 ```
 
-## `roslyn_get_type_dependencies` Coverage
+### `roslyn_get_type_dependencies` Coverage
 
 The harness verifies direct dependencies from the type declaration and member signatures only.
 
-## Covered Dependency Categories
+### Covered Dependency Categories
 
-### Base Type
+#### Base Type
 
 ```csharp
 internal sealed class FindOverloadsTool : RoslynMcpTool
@@ -390,7 +399,7 @@ Verifies `RoslynMcpTool` is reported as:
 dependency_kind = "base_type"
 ```
 
-### Directly Implemented Interface
+#### Directly Implemented Interface
 
 ```csharp
 internal sealed class _TypeDependenciesMemberFixture_<TItem> : _TypeDependenciesDirectInterface_
@@ -402,7 +411,7 @@ Verifies `_TypeDependenciesDirectInterface_` is reported as:
 dependency_kind = "interface"
 ```
 
-### Field Type
+#### Field Type
 
 ```csharp
 private FileLogger? logger;
@@ -415,7 +424,7 @@ dependency_kind = "field"
 member = "logger"
 ```
 
-### Property Type
+#### Property Type
 
 ```csharp
 public Dictionary<string, TItem[]> Items { get; } = [];
@@ -428,7 +437,7 @@ dependency_kind = "property"
 member = "Items"
 ```
 
-### Generic Type Arguments
+#### Generic Type Arguments
 
 ```csharp
 Dictionary<string, TItem[]>
@@ -436,7 +445,7 @@ Dictionary<string, TItem[]>
 
 Verifies `string` is reported as a dependency from the generic type argument list.
 
-### Event Type
+#### Event Type
 
 ```csharp
 public event Action<ErrorResult>? Changed;
@@ -449,7 +458,7 @@ dependency_kind = "event"
 member = "Changed"
 ```
 
-### Constructor Parameter
+#### Constructor Parameter
 
 ```csharp
 public FindOverloadsTool(
@@ -464,7 +473,7 @@ Verifies `WorkspaceResolver` is reported as:
 dependency_kind = "constructor_parameter"
 ```
 
-### Method Return Type
+#### Method Return Type
 
 ```csharp
 public Project? Build<TResult>(Compilation compilation)
@@ -477,7 +486,7 @@ dependency_kind = "method_return"
 member = "Build"
 ```
 
-### Method Parameter Type
+#### Method Parameter Type
 
 ```csharp
 public Project? Build<TResult>(Compilation compilation)
@@ -490,7 +499,7 @@ dependency_kind = "method_parameter"
 member = "Build"
 ```
 
-### Type Generic Constraint
+#### Type Generic Constraint
 
 ```csharp
 internal sealed class _TypeDependenciesMemberFixture_<TItem>
@@ -504,7 +513,7 @@ dependency_kind = "generic_constraint"
 member = "TItem"
 ```
 
-### Method Generic Constraint
+#### Method Generic Constraint
 
 ```csharp
 public Project? Build<TResult>(Compilation compilation)
@@ -518,7 +527,7 @@ dependency_kind = "generic_constraint"
 member = "Build"
 ```
 
-### User-Defined Operator Dependencies
+#### User-Defined Operator Dependencies
 
 ```csharp
 public static _TypeDependenciesOperatorFixture_ operator +(
@@ -538,7 +547,7 @@ dependency_kind = "method_parameter"
 member = "op_Addition"
 ```
 
-### Conversion Operator Dependencies
+#### Conversion Operator Dependencies
 
 ```csharp
 public static explicit operator string(_TypeDependenciesOperatorFixture_ value)
@@ -552,9 +561,9 @@ dependency_kind = "method_return"
 member = "op_Explicit"
 ```
 
-## Negative and Guard Coverage
+### Negative and Guard Coverage
 
-### Generic Placeholder Types Are Not Reported
+#### Generic Placeholder Types Are Not Reported
 
 ```csharp
 TItem
@@ -570,7 +579,7 @@ where TItem : ToolResult
 
 So `ToolResult` is returned, but bare `TItem` is not.
 
-### Function Pointer Dependencies Are Out of Scope
+#### Function Pointer Dependencies Are Out of Scope
 
 Function pointer dependencies are intentionally not covered in v1.
 
@@ -581,7 +590,7 @@ Function pointers require unsafe code.
 The v1 fixture set stays in safe C#.
 ```
 
-### Intentionally Out of Scope
+#### Intentionally Out of Scope
 
 The following are intentionally not reported by `roslyn_get_type_dependencies`:
 
@@ -597,7 +606,7 @@ implicit Enum base type
 unsafe function pointer internals
 ```
 
-### Manual Testing
+#### Manual Testing
 
 No separate manual UI/client testing was performed.
 
@@ -614,7 +623,7 @@ Manual exploratory testing was not needed because these are MCP tool responses w
 
 ### Week 3 Progress
 
-Implemented roslyn_find_overloads and roslyn_get_type_dependencies methods for RoslynMCP, implemented end-to-end tests and thoroughly tested these tools. Created a draft PR for these two tools. 
+Implemented `roslyn_find_overloads` and `roslyn_get_type_dependencies` for RoslynMCP, added end-to-end tests, and created a draft PR for these two tools.
 
 ### `roslyn_find_overloads`
 
@@ -671,7 +680,7 @@ The harness verifies:
 
 `roslyn_get_type_dependencies` returns the types directly referenced by a type declaration and its direct member signatures.
 
-The key design decision is that this tool reports **direct dependencies only**. It does not recursively walk into each dependency and return that dependency’s dependencies.
+The key design decision is that this tool reports **direct dependencies only**. It does not recursively walk into each dependency and return that dependency's dependencies.
 
 For example:
 
@@ -908,6 +917,7 @@ The harness also verifies:
 **PR Description:** [Draft or final PR description - much of the content above can be adapted]
 
 **Maintainer Feedback:**
+
 - [Date]: [Summary of feedback received]
 - [Date]: [How you addressed it]
 
