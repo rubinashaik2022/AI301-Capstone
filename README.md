@@ -242,54 +242,364 @@ Some older text refers to "four new analysis tools." In the current repository s
 
 ## Testing Strategy
 
-#### Integration Testing
+# Testing
 
-The new `roslyn_find_overloads` tool was tested through the project's existing `TestHarness`. These tests exercise the real MCP server rather than calling the tool method directly.
+## Integration Testing
 
-For each test, the harness:
+Verified both projects compile and type-check with Roslyn MCP diagnostic/build tools.
 
-1. Builds and starts the RoslynMcp server as a child process.
-2. Opens an MCP session through the server's standard input and output streams.
-3. Sends a JSON-RPC `tools/call` request for `roslyn_find_overloads`.
-4. Provides a real project path, containing type, and method name.
-5. The tool loads the project into a Roslyn `Compilation`.
-6. It resolves the containing type and finds matching overloads.
-7. The server serializes the result into JSON and returns it through MCP.
-8. The test harness parses and validates the returned JSON.
+### `src/RoslynMcp/RoslynMcp.csproj`
 
-The integration tests cover:
+```text
+roslyn_get_diagnostics
+Result: 0 errors, 0 warnings
+```
 
-- Finding multiple overloads with the same method name.
-- Preserving generic type parameters such as `<T>`.
-- Preserving nullable annotations such as `string?`.
-- Preserving optional/default parameter values such as `= null`.
-- Preserving `out` parameter modifiers.
-- Resolving fully qualified containing type names.
-- Returning an empty overload list when the method does not exist.
+```text
+roslyn_build_project
+Result: build succeeded
+```
 
-### Integration Tests
+### `src/TestHarness/TestHarness.csproj`
 
-- **Multiple overloads:** Calls `roslyn_find_overloads` for `RoslynMcpTool.BeginTool` and confirms that both overloads are returned.
+```text
+roslyn_get_diagnostics
+Result: 0 errors, 0 warnings
+```
 
-- **Full method signatures:** Confirms that the returned signatures preserve:
-  - Generic type parameters such as `<T>`
-  - Nullable markers such as `string?`
-  - Default values such as `subject = null`
+```text
+roslyn_build_project
+Result: build succeeded
+```
 
-  In C#, `string?` means that the value may be `null`. The parameter is optional because it has a default value.
+## End-to-End Testing
 
-- **Fully qualified type name:** Calls the tool using `RoslynMcp.Tools.RoslynMcpTool` instead of the shorter `RoslynMcpTool` name and confirms that the type still resolves correctly.
+Ran the full MCP `TestHarness`:
 
-- **`out` parameters:** Calls the tool for `TryGetCompilation` and confirms that its signature preserves `out Compilation? compilation` and `out ToolResult? error`. An `out` parameter is assigned by the method and returned to the caller.
+```bash
+dotnet run --project src/TestHarness/TestHarness.csproj
+```
 
-- **`ref` parameters:** Calls the tool for a method such as `Paginate` and confirms that `ref int skip` is preserved. A `ref` parameter allows the method to read and modify the caller's existing variable.
+The harness exercises the full MCP client/server flow:
 
-- **Missing method:** Requests a method that does not exist and confirms that the tool returns zero overloads and an empty list instead of failing.
+1. Builds `src/RoslynMcp/RoslynMcp.csproj`.
+2. Starts the RoslynMcp server as a child process.
+3. Sends the MCP `initialize` request.
+4. Sends the MCP `notifications/initialized` notification.
+5. Invokes tools through MCP JSON-RPC requests.
+6. Validates the JSON responses returned by the server.
+7. Runs teardown for scratch files and local-history fixtures.
 
+Final result:
+
+```text
+All 82 tests passed
+```
+
+The new and updated tools were exercised through the MCP protocol as part of the `Type Understanding Tools` group.
+
+## `roslyn_find_overloads` Coverage
+
+The harness verifies that `roslyn_find_overloads` handles the following cases.
+
+### Simple Containing Type Name
+
+```text
+containingType = "RoslynMcpTool"
+```
+
+Verifies overload lookup works when the caller provides a simple type name.
+
+### Fully-Qualified Containing Type Name
+
+```text
+containingType = "RoslynMcp.Tools.RoslynMcpTool"
+```
+
+Verifies overload lookup works when the caller provides a fully-qualified type name.
+
+### Multiple Overloads
+
+```text
+methodName = "BeginTool"
+```
+
+Verifies all overload signatures are returned.
+
+### Generic Method Signatures
+
+```text
+BeginTool<T>(...)
+```
+
+Verifies generic overload signatures are included.
+
+### Optional/Default Parameter Values
+
+```text
+string? subject = null
+```
+
+Verifies default parameter values are preserved in the returned signatures.
+
+### `out` Parameters
+
+```text
+out Compilation? compilation
+out ToolResult? error
+```
+
+Verifies `out` parameter modifiers are included in full signatures.
+
+### `ref` Parameters
+
+```text
+ref int skip
+```
+
+Verifies `ref` parameter modifiers are included in full signatures.
+
+### Missing Method
+
+```text
+methodName = "DefinitelyNotAMethod"
+```
+
+Verifies the tool returns an empty overload result instead of an error:
+
+```text
+total_overloads == 0
+overloads is empty
+```
+
+## `roslyn_get_type_dependencies` Coverage
+
+The harness verifies direct dependencies from the type declaration and member signatures only.
+
+## Covered Dependency Categories
+
+### Base Type
+
+```csharp
+internal sealed class FindOverloadsTool : RoslynMcpTool
+```
+
+Verifies `RoslynMcpTool` is reported as:
+
+```text
+dependency_kind = "base_type"
+```
+
+### Directly Implemented Interface
+
+```csharp
+internal sealed class _TypeDependenciesMemberFixture_<TItem> : _TypeDependenciesDirectInterface_
+```
+
+Verifies `_TypeDependenciesDirectInterface_` is reported as:
+
+```text
+dependency_kind = "interface"
+```
+
+### Field Type
+
+```csharp
+private FileLogger? logger;
+```
+
+Verifies `FileLogger` is reported as:
+
+```text
+dependency_kind = "field"
+member = "logger"
+```
+
+### Property Type
+
+```csharp
+public Dictionary<string, TItem[]> Items { get; } = [];
+```
+
+Verifies the constructed dictionary type is reported as:
+
+```text
+dependency_kind = "property"
+member = "Items"
+```
+
+### Generic Type Arguments
+
+```csharp
+Dictionary<string, TItem[]>
+```
+
+Verifies `string` is reported as a dependency from the generic type argument list.
+
+### Event Type
+
+```csharp
+public event Action<ErrorResult>? Changed;
+```
+
+Verifies `ErrorResult` is reported as:
+
+```text
+dependency_kind = "event"
+member = "Changed"
+```
+
+### Constructor Parameter
+
+```csharp
+public FindOverloadsTool(
+    WorkspaceResolver workspace,
+    FileLogger logger,
+    PaginationCache paginationCache)
+```
+
+Verifies `WorkspaceResolver` is reported as:
+
+```text
+dependency_kind = "constructor_parameter"
+```
+
+### Method Return Type
+
+```csharp
+public Project? Build<TResult>(Compilation compilation)
+```
+
+Verifies `Project` is reported as:
+
+```text
+dependency_kind = "method_return"
+member = "Build"
+```
+
+### Method Parameter Type
+
+```csharp
+public Project? Build<TResult>(Compilation compilation)
+```
+
+Verifies `Compilation` is reported as:
+
+```text
+dependency_kind = "method_parameter"
+member = "Build"
+```
+
+### Type Generic Constraint
+
+```csharp
+internal sealed class _TypeDependenciesMemberFixture_<TItem>
+    where TItem : ToolResult
+```
+
+Verifies `ToolResult` is reported as:
+
+```text
+dependency_kind = "generic_constraint"
+member = "TItem"
+```
+
+### Method Generic Constraint
+
+```csharp
+public Project? Build<TResult>(Compilation compilation)
+    where TResult : ToolResult
+```
+
+Verifies `ToolResult` is reported as:
+
+```text
+dependency_kind = "generic_constraint"
+member = "Build"
+```
+
+### User-Defined Operator Dependencies
+
+```csharp
+public static _TypeDependenciesOperatorFixture_ operator +(
+    _TypeDependenciesOperatorFixture_ left,
+    _TypeDependenciesOperatorFixture_ right)
+```
+
+Verifies `op_Addition` reports return and parameter dependencies:
+
+```text
+dependency_kind = "method_return"
+member = "op_Addition"
+```
+
+```text
+dependency_kind = "method_parameter"
+member = "op_Addition"
+```
+
+### Conversion Operator Dependencies
+
+```csharp
+public static explicit operator string(_TypeDependenciesOperatorFixture_ value)
+```
+
+Verifies `op_Explicit` reports the conversion return dependency:
+
+```text
+type_name = "string"
+dependency_kind = "method_return"
+member = "op_Explicit"
+```
+
+## Negative and Guard Coverage
+
+### Generic Placeholder Types Are Not Reported
+
+```csharp
+TItem
+```
+
+Verifies bare generic placeholder types are not returned as dependencies.
+
+`TItem` is only a placeholder. The real dependency is the constraint:
+
+```csharp
+where TItem : ToolResult
+```
+
+So `ToolResult` is returned, but bare `TItem` is not.
+
+### Function Pointer Dependencies Are Out of Scope
+
+Function pointer dependencies are intentionally not covered in v1.
+
+Reason:
+
+```text
+Function pointers require unsafe code.
+The v1 fixture set stays in safe C#.
+```
+
+### Intentionally Out of Scope
+
+The following are intentionally not reported by `roslyn_get_type_dependencies`:
+
+```text
+nested type dependencies
+attributes
+method body locals
+method body calls
+called method return types
+implicit object base type
+implicit ValueType base type
+implicit Enum base type
+unsafe function pointer internals
+```
 
 ### Manual Testing
 
-[What you tested manually and results]
+[]
 
 ---
 
