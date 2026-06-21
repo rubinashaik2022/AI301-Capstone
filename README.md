@@ -612,9 +612,282 @@ Manual exploratory testing was not needed because these are MCP tool responses w
 
 ## Implementation Notes
 
-### Week [X] Progress
+### Week 3 Progress
 
-[What you built this week, challenges faced, decisions made]
+Implemented roslyn_find_overloads and roslyn_get_type_dependencies methods for RoslynMCP, implemented end-to-end tests and thoroughly tested these tools. Created a draft PR for these two tools. 
+
+### `roslyn_find_overloads`
+
+`roslyn_find_overloads` returns the overload signatures for a method declared on a specific containing type.
+
+#### Included
+
+- Ordinary methods only.
+- Multiple overloads with the same method name.
+- Generic method signatures.
+- Fully-qualified containing type names.
+- Simple containing type names.
+- Full parameter modifiers, including:
+  - `ref`
+  - `out`
+- Nullable annotations in signatures.
+- Default parameter values where Roslyn includes them in the formatted signature.
+
+#### Not Included / Out of Scope
+
+- Constructors.
+- Operators.
+- Conversion operators.
+- Property accessors.
+- Event accessors.
+- Compiler-generated methods.
+- Methods on unrelated types with the same name.
+
+This tool is intentionally scoped to ordinary named method overloads. Operators/conversions are handled as type dependencies in `roslyn_get_type_dependencies`, but they are not treated as normal overloads here.
+
+#### Tests Added
+
+The harness verifies:
+
+- Lookup by simple containing type:
+  - `RoslynMcpTool`
+- Lookup by fully-qualified containing type:
+  - `RoslynMcp.Tools.RoslynMcpTool`
+- Multiple overloads for `BeginTool`
+- Generic overload signature:
+  - `BeginTool<T>(...)`
+- Optional/default parameter signature:
+  - `string? subject = null`
+- `out` parameters:
+  - `out Compilation? compilation`
+  - `out ToolResult? error`
+- `ref` parameters:
+  - `ref int skip`
+- Missing method:
+  - returns `total_overloads == 0`
+  - returns an empty `overloads` array
+
+### `roslyn_get_type_dependencies`
+
+`roslyn_get_type_dependencies` returns the types directly referenced by a type declaration and its direct member signatures.
+
+The key design decision is that this tool reports **direct dependencies only**. It does not recursively walk into each dependency and return that dependency’s dependencies.
+
+For example:
+
+```csharp
+class Example
+{
+    public Dictionary<string, Foo> Items { get; }
+}
+```
+
+The tool reports:
+
+```text
+Dictionary<string, Foo>
+string
+Foo
+```
+
+It does **not** inspect `Foo` and return every type that `Foo` depends on.
+
+#### Included
+
+The tool includes direct type references from:
+
+- Base type
+- Directly implemented interfaces
+- Field types
+- Property types
+- Event types
+- Constructor parameter types
+- Method return types
+- Method parameter types
+- Type generic constraints
+- Method generic constraints
+- Generic type arguments
+- Array element types
+- Pointer element types
+- User-defined operator return/parameter types
+- Conversion operator return/parameter types
+
+#### Direct Interfaces Only
+
+The tool uses direct interfaces, not inherited/transitive interfaces.
+
+Example:
+
+```csharp
+interface IA { }
+interface IB : IA { }
+
+class Example : IB { }
+```
+
+The tool reports:
+
+```text
+IB
+```
+
+It does not report:
+
+```text
+IA
+```
+
+because `IA` is indirect.
+
+#### Generic Placeholders vs Constraint Types
+
+Generic placeholder types are not reported as dependencies.
+
+Example:
+
+```csharp
+class Store<TItem>
+{
+    public TItem Item { get; }
+}
+```
+
+The tool does not report:
+
+```text
+TItem
+```
+
+because `TItem` is only a placeholder.
+
+Constraint types are reported.
+
+Example:
+
+```csharp
+class Store<TItem>
+    where TItem : ToolResult
+{
+}
+```
+
+The tool reports:
+
+```text
+ToolResult
+```
+
+because `ToolResult` is a real type dependency declared in the constraint.
+
+#### Operators and Conversions
+
+User-defined operators and conversion operators are included because they are declared directly on the type and have real parameter/return types.
+
+Example:
+
+```csharp
+public static Money operator +(Money left, Money right)
+```
+
+The tool reports the operator return and parameter types as direct dependencies.
+
+Example:
+
+```csharp
+public static explicit operator string(UserId id)
+```
+
+The tool reports:
+
+```text
+string
+UserId
+```
+
+These are represented by Roslyn as special method kinds, not ordinary methods, but they still contribute direct type dependencies.
+
+#### Function Pointers
+
+Function pointer internals are intentionally not included in v1.
+
+Reason:
+
+- Function pointers require unsafe code.
+- This project does not allow unsafe blocks.
+- The current fixture set stays in safe C#.
+- Supporting function pointer internals would require additional unsafe test infrastructure.
+- This is out of scope for the current implementation.
+
+This can be reconsidered in a future version if the project adds an unsafe fixture or decides to support unsafe dependency analysis explicitly.
+
+#### Not Included / Out of Scope
+
+The tool intentionally does not include:
+
+- Nested type dependencies
+- Attributes
+- Method body locals
+- Method body calls
+- Called method return types
+- Dependencies of dependencies
+- Transitive interfaces
+- Bare generic placeholder types such as `TItem`
+- Implicit `object` base type
+- Implicit `ValueType` base type
+- Implicit `Enum` base type
+- Function pointer internals
+
+### Response Shape
+
+`roslyn_get_type_dependencies` follows the same paged result shape used by other tools:
+
+```json
+{
+  "type_name": "Example",
+  "type_kind": "class",
+  "total_dependencies": 10,
+  "skip": 0,
+  "take": 50,
+  "dependencies": [
+    {
+      "type_name": "SomeDependency",
+      "dependency_kind": "field",
+      "member": "someField"
+    }
+  ],
+  "page_token": null,
+  "has_more": false
+}
+```
+
+Each dependency records:
+
+- `type_name`: the referenced type
+- `dependency_kind`: why the type was referenced
+- `member`: the member where the dependency was found, or `null` for type-level dependencies
+
+### Tests Added
+
+The harness verifies `roslyn_get_type_dependencies` reports:
+
+- Base type dependencies
+- Direct interface dependencies
+- Field dependencies
+- Property dependencies
+- Event dependencies
+- Constructor parameter dependencies
+- Method return dependencies
+- Method parameter dependencies
+- Type generic constraint dependencies
+- Method generic constraint dependencies
+- Generic type argument dependencies
+- User-defined operator dependencies
+- Conversion operator dependencies
+
+The harness also verifies:
+
+- Bare generic placeholders such as `TItem` are not returned
+- Missing or indirect dependency categories remain out of scope
 
 ### Week [Y] Progress
 
