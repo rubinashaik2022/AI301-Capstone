@@ -599,7 +599,14 @@ unsafe function pointer internals
 
 ### Manual Testing
 
-[]
+No separate manual UI/client testing was performed.
+
+Validation was done through:
+
+- Roslyn MCP diagnostics/build checks
+- The automated MCP `TestHarness`, which runs end-to-end through MCP JSON-RPC
+
+Manual exploratory testing was not needed because these are MCP tool responses with deterministic JSON output, and the new behavior is covered by targeted harness assertions for overload signatures and direct type dependency categories.
 
 ---
 
