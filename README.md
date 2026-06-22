@@ -625,6 +625,15 @@ Manual exploratory testing was not needed because these are MCP tool responses w
 
 Implemented `roslyn_find_overloads` and `roslyn_get_type_dependencies` for RoslynMCP, added end-to-end tests, and created a draft PR for these two tools.
 
+### Design Decisions
+
+- **Direct dependencies only:** Defined dependencies as types directly referenced by a type's declaration, members, and signatures. The tool reports directly related types, but it does not recursively inspect those types to find their own dependencies. For example, if `OrderService` depends on `OrderRepository`, the tool reports `OrderRepository`; it does not then inspect `OrderRepository` and return every type that `OrderRepository` depends on. This keeps results scoped, predictable, and useful for AI consumption.
+- **Generic type parameters:** Excluded generic placeholders such as `T`, `TKey`, and `TItem` because they are not concrete dependencies. Included constraint types because they represent actual type requirements and relationships.
+- **Unsafe constructs:** Excluded function pointer internals because they require unsafe C#, while the project and current harness fixtures stay in safe C#.
+- **Ordinary method overloads only:** Scoped `roslyn_find_overloads` to ordinary named methods. Constructors, operators, conversion operators, property accessors, event accessors, and compiler-generated methods are intentionally out of scope.
+- **Empty results instead of errors:** Made missing-method overload lookup return an empty result instead of failing, so agents can safely ask exploratory questions.
+- **Paged structured responses:** Followed the existing RoslynMcp pattern for structured, paged results so responses stay token-efficient and consistent with other tools.
+
 ### `roslyn_find_overloads`
 
 `roslyn_find_overloads` returns the overload signatures for a method declared on a specific containing type.
