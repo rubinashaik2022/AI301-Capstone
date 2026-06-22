@@ -904,24 +904,33 @@ The harness also verifies:
 
 ### Code Changes
 
-- **Files modified:** [List]
-- **Key commits:** [Links to important commits]
-- **Approach decisions:** [Why you chose certain approaches]
+- **Files modified:** implementation, tests, and documentation files for `roslyn_find_overloads` and `roslyn_get_type_dependencies`.
+- **Pending work:** `roslyn_find_unused` has not been implemented yet.
+- **Key commits:**
+  - [`a0c5d56`](https://github.com/MadQ/RoslynMcp/commit/a0c5d568db00dc0f89ceb704b1a3b073e3760b65) - implemented `roslyn_find_overloads`
+  - [`94687ac`](https://github.com/MadQ/RoslynMcp/commit/94687ac50933fb97b205350aa01ce5a217223349) - added helper support for full overloaded method signatures
+  - [`f5dcd87`](https://github.com/MadQ/RoslynMcp/commit/f5dcd878da6454b7dc0a206fcc531a759a153e0a) - added tests for the overload tool
+  - [`ed4859e`](https://github.com/MadQ/RoslynMcp/commit/ed4859ef840ab2c87ef0e37da91763cc97e6904e) - added `roslyn_get_type_dependencies` and tests
+  - [`fb82415`](https://github.com/MadQ/RoslynMcp/commit/fb82415267ea183e6e0907f54550788b1a2b8dea) - included operator and conversion dependencies
+  - [`76a4180`](https://github.com/MadQ/RoslynMcp/commit/76a41804ae50fd8b18362e03e90a787c4a9e93bb) - fixed tests and added coverage for `roslyn_get_type_dependencies`
+  - [`103ae6b`](https://github.com/MadQ/RoslynMcp/commit/103ae6bb81e0e422f10571bbf401462605f242b4) - updated docs for the new tools
+  - [`016919b`](https://github.com/MadQ/RoslynMcp/commit/016919b1d46c76803c943d0eb60a4729fef9d712) - updated changelog
+- **Approach decisions:** kept `roslyn_find_overloads` scoped to ordinary named methods, and kept `roslyn_get_type_dependencies` focused on direct dependencies from declarations and member signatures.
 
 ---
 
 ## Pull Request
 
-**PR Link:** [GitHub PR URL when submitted]
+**PR Link:** https://github.com/MadQ/RoslynMcp/pull/211
 
-**PR Description:** [Draft or final PR description - much of the content above can be adapted]
+**PR Description:** Adds `roslyn_find_overloads` and `roslyn_get_type_dependencies`, including implementation, targeted MCP `TestHarness` coverage, and documentation updates. `roslyn_find_unused` has not been implemented yet.
 
 **Maintainer Feedback:**
 
 - [Date]: [Summary of feedback received]
 - [Date]: [How you addressed it]
 
-**Status:** [Awaiting review / Iterating / Approved / Merged]
+**Status:** Open / awaiting review
 
 ---
 
