@@ -3,7 +3,7 @@
 **Contribution Number:** 1  
 **Student:** Rubina Shaik  
 **Issue:** https://github.com/MadQ/RoslynMcp/issues/33  
-**Status:** Phase III completed; `roslyn_find_unused` still in progress
+**Status:** Phase IV completed; all three analysis tools implemented
 
 ---
 
@@ -247,7 +247,7 @@ Some older text refers to "four new analysis tools." For this contribution, the 
 
 `roslyn_check_syntax` appears to have been part of the earlier suggestion set, but it has already shipped in v0.8.0-beta.
 
-Phase II completed `roslyn_get_type_dependencies` and `roslyn_find_overloads`. The PR for those two tools was merged, while `roslyn_find_unused` remains in progress.
+Phase II completed `roslyn_get_type_dependencies` and `roslyn_find_overloads`. The PR for those two tools was merged. Week 4 completed `roslyn_find_unused`.
 
 ---
 
@@ -302,7 +302,7 @@ The harness exercises the full MCP client/server flow:
 Final result:
 
 ```text
-All 82 tests passed
+All 84 tests passed
 ```
 
 The new and updated tools were exercised through the MCP protocol as part of the `Type Understanding Tools` group.
@@ -606,6 +606,128 @@ implicit Enum base type
 unsafe function pointer internals
 ```
 
+### `roslyn_find_unused` Coverage
+
+This section summarizes the integration and end-to-end test coverage added for `roslyn_find_unused`.
+
+#### Harness Location
+
+The tests live in:
+
+- `src/TestHarness/Tests/FindUnusedTests.cs`
+
+The test group is registered in:
+
+- `src/TestHarness/TestHarnessProgram.cs`
+
+The tests run through the existing MCP stdio harness, so they exercise the server process, tool registration, JSON-RPC `tools/call`, workspace loading, Roslyn reference analysis, result serialization, and response validation.
+
+#### Fixture Strategy
+
+The harness writes temporary fixture files into `src/RoslynMcp` before the test group runs, then deletes them during teardown.
+
+Temporary files:
+
+- `0_FindUnusedFixture_.cs`
+- `0_FindUnusedFixture_.generated.cs`
+- `0_FindUnusedSuffixFixture.g.cs`
+- `0_FindUnusedDesignerFixture.designer.cs`
+
+The `0_` prefix keeps fixture results early in sorted output so the default paged response includes them.
+
+The fixture contains uniquely named symbols so tests can assert inclusion or exclusion without colliding with real project code.
+
+#### Positive Coverage
+
+The first harness test verifies that expected cleanup candidates are reported with confidence metadata.
+
+Covered reported cases:
+
+- Private unused method is reported.
+- Private unused method has `confidence = high`.
+- Internal unused method is reported.
+- Internal unused method has `confidence = medium`.
+- Internal unused method reason mentions friend assemblies when `InternalsVisibleToAttribute` is present.
+- Internal unused constructor is reported.
+- Internal unused constructor has `confidence = medium`.
+- Public method inside an internal type is reported as effectively internal.
+- Effectively internal public method has `confidence = medium`.
+- Unreferenced internal containing type is reported.
+- Reported entries include non-empty `reason`.
+
+#### Conservative Skip Coverage
+
+The second harness test verifies that high false-positive-risk symbols are not reported.
+
+Covered skipped cases:
+
+- Protected method.
+- Member inside an attributed type.
+- Method with its own attribute.
+- Member inside a generated partial type.
+- Partial method declaration/implementation pair.
+- Interface implementation.
+- Method in `.g.cs` generated suffix file.
+- Method in `.designer.cs` generated suffix file.
+- Virtual method.
+- Abstract method.
+- Override method, through shared unique virtual/abstract method names.
+- Static `Main` convention entry point.
+- Enum member.
+- Child method suppressed when its containing type is already reported unused.
+- Getter-referenced property.
+- Setter-referenced property.
+- Subscribed event.
+- Member declared in one partial type part when another partial part is attributed.
+
+#### End-To-End Verification
+
+The full harness command:
+
+```bash
+dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0
+```
+
+Final result:
+
+```text
+All 84 tests passed
+```
+
+Before the final assertion fix, the harness showed one failure in `roslyn_find_unused: reports conservative candidates with confidence metadata`. The failing assertion expected the constructor result to mention friend assemblies. That was incorrect because constructor results intentionally use the reflection/dependency-injection reason. The test was fixed to assert friend-assembly wording on the internal method instead.
+
+After that correction, the full harness passed locally.
+
+#### Build And Diagnostic Verification
+
+During development, these checks were run:
+
+- `roslyn_get_diagnostics` on `src/TestHarness/TestHarness.csproj`.
+- `roslyn_build_project` on `src/TestHarness/TestHarness.csproj`.
+- `roslyn_build_project` on `src/RoslynMcp/RoslynMcp.csproj`.
+- Earlier multi-target verification included `RoslynMcp` default target and `net8.0`.
+
+Results:
+
+- Diagnostics were clean.
+- Builds succeeded.
+- `NU1900` warnings appeared because NuGet vulnerability metadata could not be fetched from `https://api.nuget.org/v3/index.json`.
+
+The `NU1900` warnings were network/metadata warnings under restricted or unavailable network access; restore/build still succeeded.
+
+#### Known Gaps
+
+The current harness coverage is sufficient for the v1 conservative design.
+
+Possible future tests:
+
+- Pagination-specific behavior for `roslyn_find_unused`.
+- Dedicated property/event result-shape tests if accessor-level behavior is ever added.
+- A focused fixture proving `.generated.cs` suffix behavior separately from `<auto-generated` header behavior. The generated partial case currently uses both.
+- `extern` method skip, if a practical fixture is added.
+
+These are not required for the current tool contract.
+
 #### Manual Testing
 
 No separate manual UI/client testing was performed.
@@ -615,7 +737,7 @@ Validation was done through:
 - Roslyn MCP diagnostics/build checks
 - The automated MCP `TestHarness`, which runs end-to-end through MCP JSON-RPC
 
-Manual exploratory testing was not needed because these are MCP tool responses with deterministic JSON output, and the new behavior is covered by targeted harness assertions for overload signatures and direct type dependency categories.
+Manual exploratory testing was not needed because these are MCP tool responses with deterministic JSON output, and the new behavior is covered by targeted harness assertions for overload signatures, direct type dependency categories, and unused-symbol analysis.
 
 ---
 
@@ -623,7 +745,22 @@ Manual exploratory testing was not needed because these are MCP tool responses w
 
 ### Week 3 Progress
 
-Implemented `roslyn_find_overloads` and `roslyn_get_type_dependencies` for RoslynMCP, added end-to-end tests, and opened a PR for these two tools only. That PR has been merged. `roslyn_find_unused` is still in progress.
+Implemented `roslyn_find_overloads` and `roslyn_get_type_dependencies` for RoslynMCP, added end-to-end tests, and opened a PR for these two tools only. That PR has been merged.
+
+### Week 4 Progress
+
+Implemented and tested `roslyn_find_unused`, which reports private/internal symbols with zero direct static references in the loaded solution. The tool was designed conservatively so agents get practical cleanup candidates without treating "zero references" as absolute proof that code is safe to delete.
+
+Key design decisions:
+
+- Prefer false negatives over false positives.
+- Skip symbols that are generated, compiler-created, attributed, reflection-sensitive, inheritance-based, or convention-based.
+- Use a confidence model instead of presenting every result as equally safe.
+- Include caution text explaining that dynamic usage, reflection, external projects, and friend assemblies can still use symbols that have no direct static references.
+
+The detailed implementation notes below document the final v1 behavior for `roslyn_find_unused`, including skipped symbol categories, generated code handling, reflection-sensitive cases, constructors, internal symbols, confidence levels, result shape, caution text, and the false-negative-over-false-positive design bias.
+
+Testing was also completed in Week 4 through the MCP `TestHarness`. The new `FindUnusedTests.cs` coverage verifies both reported cleanup candidates and conservative skip cases, and the full harness passed with all 84 tests.
 
 ### Design Decisions
 
@@ -633,6 +770,116 @@ Implemented `roslyn_find_overloads` and `roslyn_get_type_dependencies` for Rosly
 - **Ordinary method overloads only:** Scoped `roslyn_find_overloads` to ordinary named methods. Constructors, operators, conversion operators, property accessors, event accessors, and compiler-generated methods are intentionally out of scope.
 - **Empty results instead of errors:** Made missing-method overload lookup return an empty result instead of failing, so agents can safely ask exploratory questions.
 - **Paged structured responses:** Followed the existing RoslynMcp pattern for structured, paged results so responses stay token-efficient and consistent with other tools.
+- **Conservative unused-symbol analysis:** Designed `roslyn_find_unused` to report fewer, more explainable cleanup candidates. The tool skips cases where C# runtime behavior, generated code, reflection, inheritance, or framework conventions could make a zero-reference symbol unsafe to report as unused.
+
+### `roslyn_find_unused`
+
+`roslyn_find_unused` finds private/internal symbols with zero direct static references in the loaded solution.
+
+#### Skipped Symbols
+
+The tool skips compiler and language artifacts that are not useful cleanup targets:
+
+- Implicitly declared symbols.
+- Symbols without source locations.
+- Enum fields.
+- Associated symbols such as property accessors, event accessors, and backing fields.
+
+#### Generated Code
+
+Generated code is skipped, including:
+
+- Symbols declared in `.g.cs`.
+- Symbols declared in `.generated.cs`.
+- Symbols declared in `.designer.cs`.
+- Symbols declared in files whose first 1024 characters contain `<auto-generated`.
+- Members of generated containing types.
+
+Partial types are not skipped just because they are partial. Instead, the tool checks the symbol's source locations and containing types. If any relevant declaration is generated, the type or member is skipped.
+
+#### Attributes and Reflection-Sensitive Code
+
+The tool skips symbols with attributes and members of attributed containing types. This avoids reporting members that may be discovered by serializers, converters, dependency injection containers, test frameworks, command frameworks, source generators, or other reflection/convention-based systems.
+
+For partial types, Roslyn aggregates attributes across partial declarations, so an attribute on any partial part causes the type and its members to be skipped.
+
+#### Partial Methods
+
+The tool skips methods with `PartialDefinitionPart` or `PartialImplementationPart`.
+
+Partial methods can be split between declarations, implementations, and generated code. The conservative v1 rule is to skip both halves instead of trying to prove the pair is unused.
+
+#### Protected and Dispatch-Based Members
+
+The tool skips:
+
+- `protected`, `protected internal`, and `private protected` members.
+- Abstract methods.
+- Virtual methods.
+- Override methods.
+- Extern methods.
+- Interface implementations.
+- Static `Main` methods.
+
+These members may be used through inheritance, interface dispatch, runtime dispatch, external implementations, or runtime entry-point conventions.
+
+#### Properties and Events
+
+Properties and events are treated at symbol level. If either getter-style or setter-style usage exists, the property is considered referenced. The tool does not separately report unused getters, setters, add accessors, or remove accessors because accessor-level unused analysis would be noisier and would require a different result model.
+
+#### Constructors
+
+Constructors are included, but reported with medium confidence. They may have zero direct static references while still being activated by reflection or dependency injection.
+
+```csharp
+services.AddSingleton<UserService>();
+```
+
+In this example, a dependency injection container can inspect and call `UserService` constructors at runtime, even if source code never calls `new UserService(...)`.
+
+#### Internal Symbols and Friend Assemblies
+
+Internal symbols are included because the tool description explicitly includes internals. They are reported with medium confidence because other projects outside the loaded solution or friend assemblies declared through `InternalsVisibleToAttribute` may use them.
+
+When the current assembly has `InternalsVisibleToAttribute`, internal-symbol reasons mention friend assemblies.
+
+#### Confidence Model
+
+The tool uses `high` and `medium` confidence.
+
+- **High confidence:** private non-constructor symbols with zero direct static references.
+- **Medium confidence:** internal symbols, effectively internal public members, constructors, and symbols in assemblies with friend assemblies.
+
+There is no `low` confidence. If a result would be low confidence, the symbol is skipped instead.
+
+#### Result Shape
+
+Each unused entry includes:
+
+- `kind`
+- `name`
+- `accessibility`
+- `confidence`
+- `reason`
+- `file`
+- `line`
+
+The `reason` field explains why the symbol was reported at that confidence level.
+
+#### Caution Text
+
+The tool returns a caution explaining that only direct static references in the loaded solution are considered. The caution calls out dynamic usage, reflection-based usage, external projects, and external friend assemblies. If the workspace is loaded in Adhoc mode, the normal Adhoc caution is appended.
+
+#### Design Bias
+
+The tool intentionally prefers false negatives over false positives. It may miss real dead code when a symbol is reflection-sensitive, generated, attributed, partial, protected, inherited, or convention-based. This is preferable to encouraging agents to delete code that may be used through runtime mechanisms Roslyn reference search cannot fully prove.
+
+The goal is practical refactoring cleanup guidance:
+
+- Report fewer things.
+- Keep findings explainable.
+- Avoid common C# runtime and framework traps.
+- Preserve the distinction between "zero direct static references" and "definitely unused."
 
 ### `roslyn_find_overloads`
 
@@ -907,14 +1154,10 @@ The harness also verifies:
 - Bare generic placeholders such as `TItem` are not returned
 - Missing or indirect dependency categories remain out of scope
 
-### Week [Y] Progress
-
-[Continue documenting as you work]
-
 ### Code Changes
 
-- **Files modified:** implementation, tests, and documentation files for `roslyn_find_overloads` and `roslyn_get_type_dependencies`.
-- **Pending work:** `roslyn_find_unused` has not been implemented yet and is still in progress.
+- **Files modified:** implementation, tests, and documentation files for `roslyn_find_overloads`, `roslyn_get_type_dependencies`, and `roslyn_find_unused`.
+- **Current status:** `roslyn_find_unused` is implemented; continue review/iteration as needed.
 - **Key commits:**
   - [`a0c5d56`](https://github.com/MadQ/RoslynMcp/commit/a0c5d568db00dc0f89ceb704b1a3b073e3760b65) - implemented `roslyn_find_overloads`
   - [`94687ac`](https://github.com/MadQ/RoslynMcp/commit/94687ac50933fb97b205350aa01ce5a217223349) - added helper support for full overloaded method signatures
@@ -928,18 +1171,23 @@ The harness also verifies:
 
 ---
 
-## Pull Request
+## Pull Requests
+
+### PR #211
 
 **PR Link:** https://github.com/MadQ/RoslynMcp/pull/211
 
-**PR Description:** Adds `roslyn_find_overloads` and `roslyn_get_type_dependencies`, including implementation, targeted MCP `TestHarness` coverage, and documentation updates. This PR only covers those two tools; `roslyn_find_unused` has not been implemented yet and is still in progress.
-
-**Maintainer Feedback:**
-
-- [Date]: [Summary of feedback received]
-- [Date]: [How you addressed it]
+**PR Description:** Adds `roslyn_find_overloads` and `roslyn_get_type_dependencies`, including implementation, targeted MCP `TestHarness` coverage, and documentation updates. This PR only covers those two tools.
 
 **Status:** Merged on June 22, 2026
+
+### PR #212
+
+**PR Link:** https://github.com/MadQ/RoslynMcp/pull/212
+
+**PR Description:** Adds `roslyn_find_unused`, including conservative unused-symbol analysis, confidence/reason metadata, TestHarness coverage, and documentation updates.
+
+**Status:** Awaiting approval
 
 ---
 
