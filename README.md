@@ -1217,10 +1217,3 @@ Next time, I would spend even more time writing down scope decisions before impl
 
 I would also create the test fixture plan earlier. The `roslyn_find_unused` tests required many edge cases, and planning those cases upfront would make the implementation path clearer.
 
----
-
-## Resources Used
-
-- [Link to helpful documentation]
-- [Tutorial or Stack Overflow post that helped]
-- [GitHub issues or discussions that helped]
