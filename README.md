@@ -1158,7 +1158,7 @@ The harness also verifies:
 
 - **Files modified:** implementation, tests, and documentation files for `roslyn_find_overloads`, `roslyn_get_type_dependencies`, and `roslyn_find_unused`.
 - **Current status:** `roslyn_find_unused` is implemented; continue review/iteration as needed.
-- **Key commits:**
+- **Key commits for PR #211 (`roslyn_find_overloads` and `roslyn_get_type_dependencies`):**
   - [`a0c5d56`](https://github.com/MadQ/RoslynMcp/commit/a0c5d568db00dc0f89ceb704b1a3b073e3760b65) - implemented `roslyn_find_overloads`
   - [`94687ac`](https://github.com/MadQ/RoslynMcp/commit/94687ac50933fb97b205350aa01ce5a217223349) - added helper support for full overloaded method signatures
   - [`f5dcd87`](https://github.com/MadQ/RoslynMcp/commit/f5dcd878da6454b7dc0a206fcc531a759a153e0a) - added tests for the overload tool
@@ -1167,6 +1167,10 @@ The harness also verifies:
   - [`76a4180`](https://github.com/MadQ/RoslynMcp/commit/76a41804ae50fd8b18362e03e90a787c4a9e93bb) - fixed tests and added coverage for `roslyn_get_type_dependencies`
   - [`103ae6b`](https://github.com/MadQ/RoslynMcp/commit/103ae6bb81e0e422f10571bbf401462605f242b4) - updated docs for the new tools
   - [`016919b`](https://github.com/MadQ/RoslynMcp/commit/016919b1d46c76803c943d0eb60a4729fef9d712) - updated changelog
+- **Key commits for PR #212 (`roslyn_find_unused`):**
+  - [`10e53db`](https://github.com/MadQ/RoslynMcp/commit/10e53dbd7c84ee6e94af9a00a4137c96e85735e0) - hardened `roslyn_find_unused` edge-case handling, including generated/attributed symbols, effective internal visibility, and confidence/reason metadata
+  - [`5b5cb9f`](https://github.com/MadQ/RoslynMcp/commit/5b5cb9f964f6f64de6c2bb58d328c39fa189da80) - added tests for `roslyn_find_unused`
+  - [`82102f3`](https://github.com/MadQ/RoslynMcp/commit/82102f35a062a48e1db767899c98a1caebd0781d) - updated documentation for `roslyn_find_unused`
 - **Approach decisions:** kept `roslyn_find_overloads` scoped to ordinary named methods, and kept `roslyn_get_type_dependencies` focused on direct dependencies from declarations and member signatures.
 
 ---
@@ -1195,15 +1199,23 @@ The harness also verifies:
 
 ### Technical Skills Gained
 
-[What you learned technically]
+I expanded my C# knowledge by working with Roslyn's semantic model and symbol APIs. This included resolving symbols, finding references with `SymbolFinder`, formatting method signatures, identifying direct type dependencies, and distinguishing source-declared symbols from compiler-generated or generated-code artifacts.
+
+I also gained a better understanding of how MCP servers work and how MCP tools are structured. This included tool registration, request/response models, paged results, JSON-RPC tool calls, and end-to-end validation through the existing `TestHarness`.
 
 ### Challenges Overcome
 
-[What was hard and how you solved it]
+The hardest part was defining the correct scope before coding. Planning out what the tool should and should not include turned out to be just as important as the implementation itself.
+
+For example, with `roslyn_get_type_dependencies`, the first instinct was to let the tool find every nested or transitive dependency. However, the intended scope was direct dependencies only. Making that distinction early kept the tool predictable and aligned with the issue description.
+
+Another challenge was thinking through edge cases for `roslyn_find_unused`. A symbol can have zero direct static references but still be used through reflection, dependency injection, inheritance, generated code, or framework conventions. To handle that safely, I designed the tool to be conservative, include confidence metadata, and skip cases that had a high false-positive risk.
 
 ### What I'd Do Differently Next Time
 
-[Reflection on your process]
+Next time, I would spend even more time writing down scope decisions before implementing. AI can help generate ideas and code, but I should not over-rely on it to decide the behavior of the tool. The developer still needs to define the contract, review whether suggestions match the issue, and think carefully about edge cases before coding.
+
+I would also create the test fixture plan earlier. The `roslyn_find_unused` tests required many edge cases, and planning those cases upfront would make the implementation path clearer.
 
 ---
 
