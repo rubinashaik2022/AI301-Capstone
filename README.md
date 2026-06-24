@@ -1191,7 +1191,7 @@ The harness also verifies:
 
 **PR Description:** Adds `roslyn_find_unused`, including conservative unused-symbol analysis, confidence/reason metadata, TestHarness coverage, and documentation updates.
 
-**Status:** Awaiting approval
+**Status:** Merged on June 23, 2026
 
 ---
 
