@@ -1191,7 +1191,9 @@ The harness also verifies:
 
 **PR Description:** Adds `roslyn_find_unused`, including conservative unused-symbol analysis, confidence/reason metadata, TestHarness coverage, and documentation updates.
 
-**Status:** Awaiting approval
+**Status:** Merged on June 23, 2026
+
+Positive feedback received on both PRs and was merged. 
 
 ---
 
@@ -1217,10 +1219,3 @@ Next time, I would spend even more time writing down scope decisions before impl
 
 I would also create the test fixture plan earlier. The `roslyn_find_unused` tests required many edge cases, and planning those cases upfront would make the implementation path clearer.
 
----
-
-## Resources Used
-
-- [Link to helpful documentation]
-- [Tutorial or Stack Overflow post that helped]
-- [GitHub issues or discussions that helped]
