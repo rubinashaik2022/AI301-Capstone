@@ -18,12 +18,6 @@ I chose this issue because it connects directly to my interest in AI developer t
 
 Right now, roslyn_get_diagnostics surfaces diagnostics, but fixing them requires for an AI agent to reason about the fixes and call replace_in_code. This is slow and expensive. roslyn_apply_code_fix will apply the Roslyn CodeFixProvider fixes automatically, without the agent having to do any reasoning about the edits. This lowers expenses significantly and is highly efficient. 
 
-Expected Behavior
-
-Current Behavior
-
-Affected Components
-
 ### Expected Behavior
 RoslynMcp should discover, preview, and apply Roslyn code fixes outside VS Code, including Fix All where supported.
 
