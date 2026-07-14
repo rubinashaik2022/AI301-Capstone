@@ -33,19 +33,45 @@ MSBuildWorkspace, diagnostics, analyzer loading, .editorconfig options, solution
 
 ### Environment Setup
 
-[Notes on setting up your local development environment - challenges you faced, how you solved them]
+I used my local fork of RoslynMcp:
+
+```text
+https://github.com/rubinashaik2022/RoslynMcp.git
+```
+
+Local path:
+
+```text
+/Users/rubinashaik/RoslynMcp
+```
+
+Working branch:
+
+```text
+issue-110-apply-bulk-code-fix
+```
+
+The issue being researched is:
+
+```text
+https://github.com/MadQ/RoslynMcp/issues/110
+```
 
 ### Steps to Reproduce
 
-1. [Step 1]
-2. [Step 2]
-3. [Observed result]
+1. Open the RoslynMcp issue for `roslyn_apply_code_fix`: https://github.com/MadQ/RoslynMcp/issues/110.
+2. Read the current behavior described in the issue: `roslyn_get_diagnostics` can surface diagnostics, but RoslynMcp does not currently expose or apply the matching Roslyn `CodeFixProvider` fixes.
+3. In the local RoslynMcp repo, inspect the diagnostics implementation to confirm the current path only reports diagnostics and does not collect code fix actions.
+4. Inspect the in-repo analyzer project and confirm that Roslyn code fix providers already exist, including providers for `RMCP001` / `RMCP002` and `RMCP003` through `RMCP006`.
+5. Confirm that these code fix providers expose `FixableDiagnosticIds` and register suggested `CodeAction`s through Roslyn's `CodeFixContext` / `RegisterCodeFixesAsync` pattern.
+6. Compare this with the existing preview/apply tools, especially rename and signature-change, to confirm RoslynMcp already has a safe pattern for previewing a changed `Solution`, storing an approval token, and applying changes later.
+7. Observe the gap: RoslynMcp has diagnostics and safe apply infrastructure, but it does not yet have a host/wrapper that asks matching `CodeFixProvider`s for their available fixes and turns a selected `CodeAction` into a previewable diff.
 
 ### Reproduction Evidence
 
-- **Commit showing reproduction:** [Link to commit in your fork]
-- **Screenshots/logs:** [If applicable]
-- **My findings:** [What you discovered during reproduction]
+- **Branch link:** https://github.com/rubinashaik2022/RoslynMcp/tree/issue-110-apply-bulk-code-fix
+- **Issue link:** https://github.com/MadQ/RoslynMcp/issues/110
+- **My findings:** CodeFixProviders can be used outside VS Code with `MSBuildWorkspace`. Analyzer NuGet packages are detected, but RoslynMcp still needs to explicitly load and run their fixes. `.editorconfig` settings feed through correctly. FixAll is possible, but should be deferred until after the single-fix pipeline is working because large FixAll runs may touch many files and need caps, preview summaries, and performance testing.
 
 ---
 
@@ -53,30 +79,27 @@ MSBuildWorkspace, diagnostics, analyzer loading, .editorconfig options, solution
 
 ### Analysis
 
-[Your analysis of the root cause - what's causing the issue?]
+The root issue is that RoslynMcp can currently report diagnostics, but it does not expose the matching Roslyn code fixes as MCP tools. Right now, when an AI agent sees a diagnostic, it has to read the surrounding code, reason about the correct edit, and then call a lower-level editing tool such as `roslyn_replace_in_code`. That uses more tokens, takes more steps, and increases the risk that the agent makes a weaker edit than Roslyn's own fix provider would make.
+
+Roslyn already has `CodeFixProvider`s that know how to fix many diagnostics. These are the same kind of suggested fixes shown by IDE lightbulbs. The missing piece is a RoslynMcp wrapper/tool that can find the providers for a diagnostic, collect their available fixes, preview the selected fix, and apply it safely.
 
 ### Proposed Solution
 
-[High-level description of your fix approach]
+Add a new preview/apply code-fix workflow to RoslynMcp. The first phase should focus on applying a single selected fix for one diagnostic at a specific file location. The tool will ask matching `CodeFixProvider`s for available `CodeAction`s, return choices when more than one fix exists, generate a diff for the selected fix, and only write files after approval.
+
+This makes the workflow more token efficient because the AI agent no longer has to manually reason through every code edit. Instead, the agent can use Roslyn's built-in code-fix logic and RoslynMcp's existing safe preview/apply pattern.
 
 ### Implementation Plan
 
-Using UMPIRE framework (adapted):
+For the first PR, I plan to focus on the simple single-fix pipeline instead of FixAll. The goal is to prove RoslynMcp can behave like the IDE lightbulb for one diagnostic at one location.
 
-**Understand:** [Restate the problem]
-
-**Match:** [What similar patterns/solutions exist in the codebase?]
-
-**Plan:** [Step-by-step implementation plan]
-1. [Modify file X to do Y]
-2. [Add function Z]
-3. [Update tests]
-
-**Implement:** [Link to your branch/commits as you work]
-
-**Review:** [Self-review checklist - does it follow the project's contribution guidelines?]
-
-**Evaluate:** [How will you verify it works?]
+- Add a small `CodeFixHost` service that wraps Roslyn's `CodeFixProvider` API behind a simpler method such as `GetFixesAsync(document, diagnostic, cancellationToken)`.
+- The wrapper will loop through known `CodeFixProvider`s, check whether each provider supports the diagnostic ID, create a `CodeFixContext`, and use the context callback to collect the provider's registered `CodeAction`s into a list.
+- Add a preview tool that targets one diagnostic by project path, file path, line, column, and optional diagnostic ID. If one fix exists, it will preview that fix. If multiple fixes exist, it will return the choices and require an `actionIndex` instead of guessing.
+- Execute the selected `CodeAction` in memory, extract the changed `Solution`, build a unified diff, and store it behind an approval token using the existing preview/apply pattern already used by rename and signature-change tools.
+- Add an apply tool that consumes the token, supports approval values `y`, `n`, and `session`, saves backups before writing, and applies the changed solution safely.
+- Test first with the in-repo analyzer code fixes, especially `RMCP001` / `RMCP002`, because those providers are already available and give a clear single-fix case.
+- Defer FixAll to a second phase. FixAll should build on the selected single-fix action and use the provider's FixAll support, but it needs preview counts, changed-file caps, timeout/cancellation behavior, and explicit opt-in for large project or solution-wide edits.
 
 ---
 
