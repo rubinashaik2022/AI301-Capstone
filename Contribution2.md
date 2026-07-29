@@ -4,11 +4,11 @@
 **Student:** Rubina Shaik  
 **Issue:** [MadQ/RoslynMcp #110](https://github.com/MadQ/RoslynMcp/issues/110)  
 **Development Branch:** [issue-110-apply-bulk-code-fix](https://github.com/rubinashaik2022/RoslynMcp/tree/issue-110-apply-bulk-code-fix)  
-**Project Status:** Phase III — In Progress  
-**Tool Status:** Phase I targeted code-fix workflow is implemented but still requires final verification, partial-write reporting, workspace-token binding, focused tests, and cleanup before the first PR.  
+**Project Status:** Phase I implementation complete; final end-to-end startup verification is blocked by an MCP server initialization hang  
+**Tool Status:** The targeted code-fix workflow now has strict provider, file, workspace, encoding, approval, backup, concurrency, persistence, and partial-failure boundaries. Both projects build successfully and focused boundary tests are implemented.  
 **Delivery Plan:** PR 1 will complete and submit Phase I of the tool. A separate PR 2 will implement Phase II Fix All support after the targeted preview/apply pipeline is fully validated.
 
-> **Development note:** This contribution is not complete yet. The current branch contains the main Phase I implementation and stale-file safety work, but the first review round should not begin until the remaining Phase I completion items are addressed. Fix All is intentionally separated into a later PR so the first PR stays focused on a safe, fully tested single-diagnostic workflow.
+> **Development note:** The Phase I safety scope is now deliberately narrow: only bundled RoslynMcp code-fix providers may run, and only existing writable, non-generated `.cs` files inside the resolved workspace may be modified. File creation, deletion, moves, linked or external files, project-system changes, references, additional documents, and analyzer-config changes are rejected. Fix All remains a separate Phase II contribution.
 
 ---
 
@@ -54,7 +54,7 @@ RoslynMcp exposed diagnostics but did not ask matching `CodeFixProvider` instanc
 - Unified solution diffs
 - Approval tokens and session approval
 - Local-history backups
-- Physical file creation, modification, and deletion
+- Physical file modification, encoding preservation, atomic replacement, and verification
 - Workspace invalidation and recovery
 - Test harness integration
 
@@ -177,41 +177,47 @@ If an affected file disappears, becomes inaccessible, or conflicts with a propos
 
 ---
 
-## Current Approval-Token Lifecycle
+## Approval-Token Lifecycle
 
 The current implementation stores tokens in memory for the lifetime of the server process.
 
 ```text
 Preview succeeds
-    -> Pending token
-    -> approved/rejected/error
+    -> Pending
+    -> Applying
+    -> Consumed
 ```
 
 ### Cases where the token is not consumed
 
-The token remains pending when apply stops before the current point of no return:
+The token remains pending when apply stops before claiming the operation:
 
 - Approval value is invalid
 - The preview is stale because an affected path changed
 - Backup creation fails before source mutation
+- The supplied workflow or workspace does not match the preview
 
-The stale token technically remains stored, but retrying it is normally not useful unless the affected path returns exactly to its preview state. Generating a fresh preview is safer.
+The approval token is bound to both the code-fix workflow and the canonical workspace identity. A token from rename, signature change, or another workspace cannot be applied through `roslyn_apply_code_fix`.
 
 ### Cases where the token is removed without applying
 
-Approval `n` rejects and removes the token. No files are changed.
+Approval `n` atomically rejects and removes a pending token. If another request has already claimed it for application, rejection reports that the token is unavailable instead of falsely claiming that an in-progress apply was rejected.
 
 ### Current point of consumption
 
-For approval `y` or `session`, apply currently performs:
+For approval `y` or `session`, apply performs:
 
-1. Token lookup
+1. Token, workflow, and workspace validation
 2. Affected-file stale validation
-3. Pre/post backup preparation
-4. Token consumption
-5. Workspace writes and file deletions
+3. Pre/post backup preparation using exact bytes
+4. Atomic transition from `Pending` to `Applying`
+5. A second validation inside the global physical-apply gate
+6. Same-directory temporary-file staging
+7. A final target-hash check immediately before atomic replacement
+8. Exact post-write hash verification
+9. Transition to `Consumed`
 
-The token is consumed after backups succeed but before the first source write. This prevents two simultaneous requests from applying the same token.
+The atomic claim prevents two simultaneous requests from applying the same token. The process-wide apply gate also serializes physical solution application, which closes cross-token races between validation and persistence.
 
 ### Successful application
 
@@ -219,31 +225,17 @@ The token remains consumed after all intended changes are applied.
 
 ### Write failure before any file changes
 
-Because the token was already consumed at the current point of no return, it cannot be reused even if the workspace fails before changing a physical file. The caller must generate a new preview.
-
-This is safe but not ideal for retry experience.
+Once claimed, the token cannot be reused. The response reports the verified state of each file so the caller can distinguish an unchanged file from a successful or uncertain write and generate a fresh preview when appropriate.
 
 ### Partial multi-file write
 
 If some files are written before another file fails, the token remains consumed. Reusing the original token would be unsafe because the workspace no longer matches the original preview baseline.
 
-Backups allow recovery, but exact per-file partial-result reporting remains Phase I work.
+The result reports each physical operation as written, deleted, unchanged, or uncertain and includes operation-specific recovery guidance. Backups provide exact pre-change and intended post-change snapshots.
 
-### Deletion failure
+### Phase I deletion policy
 
-If content files are written but a later physical deletion fails, the token remains consumed. The current result reports the written-file count, completed deletion count, failed deletion path, and local-history recovery guidance.
-
-### Planned token improvement
-
-A lower-priority future improvement is a three-state lifecycle:
-
-```text
-Pending -> Applying -> Consumed
-              |
-              +--> Pending only when zero physical changes are verified
-```
-
-This would make transient zero-write failures retryable while still consuming tokens after successful, partial, or uncertain writes. It is deferred until exact post-write verification can reliably prove whether any physical change occurred.
+Deletion is rejected during preview and checked again during apply. Phase I cannot create, delete, or move `.cs` files, so it cannot silently break SDK globs or explicit MSBuild `<Compile Include>` entries.
 
 ---
 
@@ -320,18 +312,21 @@ Diagnostic and source location
         -> apply only after explicit approval
 ```
 
+Phase I deliberately supports modification only. A proposed action is rejected unless every physical effect is a modification to an existing writable, non-generated `.cs` file inside the workspace. This policy avoids project-system ambiguity and keeps the first release truthful about what it can safely persist.
+
 ### Why Preview and Apply Are Separate
 
 A code fix may affect more than the source token where the diagnostic appears. The two-step workflow provides several safeguards:
 
 - The caller reviews a unified diff before mutation.
-- The exact `ChangedSolution` reviewed during preview is stored with the token.
+- The exact intended bytes derived from the reviewed `ChangedSolution` are stored with the token.
 - Apply does not recalculate the action or replay a text patch.
 - Explicit approval is required before disk writes.
 - Backups are created before source mutation.
 - Stale affected files are rejected rather than overwritten.
+- The original encoding and byte-order-mark choice are preserved.
 
-### Why the Changed Solution Is Stored
+### Why the Changed Solution Is Calculated Once
 
 Roslyn `Solution` objects are immutable snapshots. Executing a `CodeAction` produces a proposed `ChangedSolution`, but it does not alter physical files. The diff is generated by comparing:
 
@@ -339,7 +334,7 @@ Roslyn `Solution` objects are immutable snapshots. Executing a `CodeAction` prod
 BaseSolution -> ChangedSolution
 ```
 
-The diff is for review; the stored `ChangedSolution` remains the semantic source of truth. This avoids text-patch context failures and preserves Roslyn's representation of modified, added, and removed documents.
+The diff is for review. During preview, the changed source text is encoded into the exact bytes that should reach disk. Those intended bytes remain the persistence source of truth during backup, write, and verification. This avoids recalculating text during apply and prevents encoding or byte-order-mark drift.
 
 ---
 
@@ -353,7 +348,7 @@ When several diagnostics match the location, the tool returns the choices and as
 
 ### 2. Discover Matching Code Fixes
 
-`CodeFixHost` owns the loaded `CodeFixProvider` instances. For each provider it:
+`CodeFixHost` owns an explicit allowlist of code-fix providers bundled with RoslynMcp. It does not load arbitrary providers from workspace analyzer packages. For each allowed provider it:
 
 1. Checks whether `FixableDiagnosticIds` contains the diagnostic ID.
 2. Creates a Roslyn `CodeFixContext`.
@@ -361,102 +356,63 @@ When several diagnostics match the location, the tool returns the choices and as
 4. Captures the provider's registered `CodeAction` instances.
 5. Records the provider name, title, equivalence key, diagnostic ID, and action index.
 
-If several actions are available, preview returns them and requires an explicit `actionIndex`. This prevents RoslynMcp from silently choosing between fixes with different semantics.
+If several actions are available, preview returns them and requires an explicit `actionIndex`. This prevents RoslynMcp from silently choosing between fixes with different semantics. Restricting Phase I to bundled providers also prevents external analyzer packages from introducing unreviewed code execution or operations that bypass the intended safety model.
 
 ### 3. Calculate the Code Action in Memory
 
 A `CodeAction` is a recipe, not a diff and not a file write. Preview calls `GetOperationsAsync` and extracts the `ChangedSolution` from an `ApplyChangesOperation`.
 
-The current providers produce the standard single `ApplyChangesOperation` shape. A small remaining hardening task is to explicitly reject zero, multiple, or custom operations rather than relying on `SingleOrDefault` behavior.
+Phase I requires exactly one `ApplyChangesOperation`. Zero operations, multiple operations, or custom operation types return a structured unsupported-action result. Cancellation propagates normally, while non-cancellation provider failures are converted into clean tool errors containing the diagnostic, provider, and action context.
 
 ### 4. Generate the Unified Diff
 
 `SolutionDiff.BuildAsync` compares the immutable base and changed solutions. The caller reviews this diff, but apply later uses the stored changed solution directly.
 
-### 5. Translate Roslyn Documents into Physical File Effects
+### 5. Enforce the Phase I Physical Boundary
 
-Roslyn reports document-level changes:
+Roslyn reports document- and project-level changes. Preview enumerates the complete solution change set and rejects:
 
-```csharp
-GetChangedDocuments()
-GetAddedDocuments()
-GetRemovedDocuments()
-```
+- Added, removed, or moved documents
+- Linked files and files outside the workspace
+- Non-`.cs` files
+- Generated files
+- Read-only or otherwise non-writable files
+- Project changes, metadata references, project references, analyzer references, additional documents, and analyzer-config documents
 
-A Roslyn document is not always a unique disk file. Linked files and multi-targeted projects can contain several `Document` objects that point to one physical path.
-
-```text
-Project A document ----+
-                       +--> /repo/Shared.cs
-Project B document ----+
-```
-
-The implementation therefore reasons about physical paths across the entire solution:
-
-- A modified document normally rewrites an existing file.
-- An added document may create a new file or add another link to an existing file.
-- A removed document may remove one project link or remove the final solution reference.
-- A physical file is deleted only when the changed solution contains no remaining document for that path.
-- Duplicate physical paths are grouped so one file is processed once.
+The same modification-only `.cs` boundary is checked again during apply. A malformed, stale, or wrong-workflow token therefore cannot bypass preview validation.
 
 ### 6. Capture Affected File States
 
-The preview stores an expected physical state for every path that the action intends to touch:
+For every allowed modified file, preview reads the original bytes and stores:
 
 ```csharp
-internal enum ExpectedFileState
-{
-    Exists,
-    Absent
-}
-
 internal sealed record PreviewFileState(
-    ExpectedFileState ExpectedState,
-    string? ContentHash);
+    string OriginalHash,
+    byte[] IntendedBytes,
+    string IntendedHash);
 ```
-
-| Proposed operation | Preview expectation |
-|---|---|
-| Modify a file | Exists with its original SHA-256 |
-| Add a new file | Remains absent |
-| Remove a file | Exists with its original SHA-256 |
-| Add another link to an existing file | Exists with original SHA-256 |
-| Remove one of several links | No physical deletion expectation |
 
 SHA-256 is calculated over exact disk bytes, so source, comments, whitespace, line endings, and encoding changes are all detected.
 
-Only affected paths are tracked. Unrelated repository changes do not invalidate a preview. The goal is to prevent destructive overlap with concurrent work, not to freeze the entire solution.
+The changed Roslyn `SourceText` is encoded with the original file's encoding. Preview detects whether the original bytes contained that encoding's preamble, commonly called a byte-order mark or BOM, and preserves that exact choice. The intended bytes are stored once and reused for the post-backup, physical write, and verification.
 
 ### 7. Store the Pending Operation
 
 `ApprovalStore` keeps the following data in memory:
 
 - Base solution
-- Changed solution
 - Unified diff
+- Workflow kind and canonical workspace identity
 - Session-approval key
-- Affected physical-file states
+- Original hashes and exact intended bytes
 
 The returned token identifies the exact proposal reviewed by the caller.
 
 ### 8. Reject Stale Previews
 
-Before backups, token consumption, or writes, apply rechecks every affected path.
+Before backups and again inside the global physical-apply gate, apply rechecks every affected path.
 
-For an expected existing path:
-
-```text
-The path must exist.
-Its current SHA-256 must equal its preview SHA-256.
-```
-
-For an expected absent path:
-
-```text
-The path must still be absent.
-```
-
-If an affected file changed, disappeared, or unexpectedly appeared, apply returns `stale preview` and writes nothing.
+The path must still exist, remain writable, remain an allowed `.cs` file, and match its preview SHA-256. If it changed, disappeared, or became unavailable, apply returns a clean stale or unavailable result without overwriting it.
 
 ### 9. Create Recovery Snapshots
 
@@ -464,23 +420,19 @@ Backups are created before source mutation:
 
 | Physical operation | Pre snapshot | Post snapshot |
 |---|---:|---:|
-| Modify | Original contents | Intended contents |
-| Create | None | Intended contents |
-| Delete | Original contents | None |
+| Modify existing `.cs` file | Exact original bytes | Exact intended bytes |
 
-Pre snapshots support rollback. Post snapshots can restore or complete intended content after a failed write. A newly created file has no pre snapshot, so rolling it back means deleting it.
+Pre snapshots support rollback. Post snapshots restore or complete the exact approved output, including its original encoding and BOM choice.
 
-### 10. Apply Changes in Both Workspace Modes
+### 10. Persist Exact Bytes Atomically
 
-In MSBuild mode, the changed solution is passed through the workspace apply path. In Adhoc mode, RoslynMcp writes changed and added documents explicitly through `SolutionDiff`, `FileWriter`, and workspace invalidation.
+Code-fix persistence no longer delegates to `Workspace.ApplyChanges`. The physical applier writes the already-approved intended bytes to a uniquely named temporary file in the target directory, preserves the target's Unix mode when applicable, performs a final target-hash check, and atomically replaces the existing file.
 
-Removed paths are collected from `BaseSolution`, because they no longer exist in `ChangedSolution`. A path is physically deleted only after its final solution reference disappears. Deleted paths are invalidated from the workspace, and the response reports a deleted-file count.
+The same-directory temporary file keeps the final rename on the same filesystem. This dramatically narrows the time-of-check/time-of-use gap and prevents a failed or interrupted write from truncating the original target.
 
-### 11. Truncation Recovery
+### 11. Verify and Report the Final State
 
-The existing RoslynMcp write pipeline protects against catastrophic truncation, where a workspace write appears successful but leaves a file missing or empty. RoslynMcp can rewrite the intended bytes through a temporary file and atomically replace the damaged target.
-
-The current check is size-oriented. It detects catastrophic empty-file damage but does not yet prove that every non-empty file exactly matches the intended content. Exact post-write SHA-256 verification is the highest-priority remaining Phase I improvement.
+After replacement, the applier hashes the actual disk bytes and compares them with the stored intended hash. Every operation receives a verified state such as written, unchanged, or uncertain. Partial failures report exact per-file outcomes and recovery guidance rather than only an aggregate count.
 
 ---
 
@@ -515,6 +467,28 @@ The follow-up implementation added:
 - Structured preview errors when a safe physical baseline cannot be captured.
 - A regression test confirming that a concurrent user edit causes `stale preview` and remains untouched.
 
+The original add/remove implementation was subsequently narrowed for the first release. Creation, deletion, moves, and linked-file operations are now rejected because they can require `.csproj` edits and project-system reasoning that Phase I does not yet support.
+
+### Phase I Hardening Pass
+
+The final hardening work added:
+
+- Atomic token claiming and workflow-specific token validation.
+- Canonical workspace binding so a token cannot be applied through another project.
+- Exact-one-`ApplyChangesOperation` enforcement.
+- Per-file partial-write states and recovery messages.
+- An explicit allowlist containing only bundled RoslynMcp providers.
+- Rejection of arbitrary providers from external analyzer packages.
+- Preview and apply enforcement for existing writable, non-generated in-workspace `.cs` files only.
+- Rejection of project, reference, additional-document, analyzer-config, create, delete, move, linked, and external changes.
+- Exact preservation of the source encoding and BOM choice.
+- Storage of exact intended bytes in the approved physical plan.
+- Use of the same intended bytes for post-backup, write, and hash verification.
+- Cancellation propagation instead of converting cancellation into ordinary provider or I/O failures.
+- Removal of inaccurate preview idempotency metadata.
+- A process-wide physical-apply gate, a second stale check inside the gate, same-directory temporary-file staging, and atomic replacement.
+- Accurate rejection reporting when another request is already applying the token.
+
 ### Key Design Decisions
 
 1. **Separate preview from apply.** Multi-file semantic changes require explicit review and approval.
@@ -522,10 +496,10 @@ The follow-up implementation added:
 3. **Track only affected paths.** Unrelated work should not invalidate the preview.
 4. **Hash exact bytes.** Byte-level comparison detects formatting, encoding, and line-ending changes in addition to source edits.
 5. **Represent absence explicitly.** New-file collision protection is part of the state model rather than encoded with a magic hash value.
-6. **Reason about paths across the complete solution.** Roslyn documents are not guaranteed to correspond one-to-one with disk files.
+6. **Reject ambiguous physical effects.** Linked files, create/delete/move operations, and project-system edits are deferred instead of approximated.
 7. **Back up before mutation.** Failed backup preparation cannot leave source files partially changed.
 8. **Do not automatically roll back partial changes.** Automatic rollback can fail or overwrite concurrent work; snapshots and explicit recovery are safer.
-9. **Self-heal only obvious truncation.** Missing or empty output strongly indicates persistence damage, while non-empty unexpected content may be user work.
+9. **Write exact bytes atomically.** Temporary-file staging protects the existing target, and exact hashes—not file size—prove the final result.
 10. **Build Fix All on the same apply pipeline.** Phase II should change how the combined action is calculated, not introduce a second disk-write implementation.
 
 ---
@@ -540,8 +514,15 @@ The follow-up implementation added:
 
 - [`06733d5` - added preview code fix tool + apply code fix tool + focused tests](https://github.com/rubinashaik2022/RoslynMcp/commit/06733d5)
 - [`e1ecdc6` - fix: protect code-fix apply from stale file changes](https://github.com/rubinashaik2022/RoslynMcp/commit/e1ecdc6)
+- `755b83f` - make token consumption atomic
+- `301be22` - attach token to workspace
+- `0c06fb6` - require exactly one `ApplyChangesOperation`
+- `4a23c0f` - add partial-write handling and reporting
+- `1ef7088` - harden the apply pipeline and restrict providers
+- `b4d2e6e` - harden preview boundaries and preserve file encoding
+- `7b603fd` - harden apply concurrency and file persistence
 
-The commits are currently ahead of the remote branch and should be pushed before submitting a draft PR.
+The local branch is ahead of the remote branch and should be pushed before submitting the first-round PR.
 
 ### Primary Files
 
@@ -549,6 +530,7 @@ The commits are currently ahead of the remote branch and should be pushed before
 - `src/RoslynMcp/Tools/CodeFix/PreviewCodeFixTool.cs`
 - `src/RoslynMcp/Tools/CodeFix/ApplyCodeFixTool.cs`
 - `src/RoslynMcp/ApprovalStore.cs`
+- `src/RoslynMcp/PhysicalSolutionApply.cs`
 - `src/RoslynMcp/Program.cs`
 - `src/RoslynMcp/RoslynMcp.csproj`
 - `src/TestHarness/TestHarnessProgram.cs`
@@ -559,7 +541,7 @@ The commits are currently ahead of the remote branch and should be pushed before
 
 ## Testing Strategy
 
-### Implemented Integration Coverage
+### Implemented Integration and Boundary Coverage
 
 - End-to-end MCP preview and apply test for `RMCP001`.
 - Confirms preview returns a token and a diff containing the `nint` replacement.
@@ -567,6 +549,13 @@ The commits are currently ahead of the remote branch and should be pushed before
 - Regression test previews a fix, performs a simulated concurrent edit, applies the old token, and verifies:
   - The result is `stale preview`.
   - The concurrent edit remains byte-for-byte intact.
+- Rejects create, delete, move, linked/external, generated, read-only, non-C#, project, reference, additional-document, and analyzer-config effects.
+- Rejects wrong-workflow and wrong-workspace tokens.
+- Rejects unsupported provider-operation shapes.
+- Verifies modification-only policy again during apply.
+- Covers UTF-8 and other supported source encodings with and without a BOM.
+- Verifies the exact intended bytes are used for backup, persistence, and final hash comparison.
+- Covers atomic approval races, partial-result reporting, cancellation propagation, and clean file-access failure reporting.
 
 ### Static and Build Validation Performed
 
@@ -577,157 +566,34 @@ The commits are currently ahead of the remote branch and should be pushed before
 - The only reported build warnings were `NU1900` warnings because NuGet vulnerability metadata could not be reached from the restricted environment; these were unrelated to source correctness.
 - Reviewed the semantic diff after edits and caught/restored MCP registration attributes that had been removed during an intermediate method replacement.
 
-### Environment Limitation
+### End-to-End Harness Blocker
 
-The shell environment used during the final local pass did not expose `dotnet` or `pwsh` on `PATH`. As a result, the full executable harness and `scripts/Test-CodeStyle.ps1 -Fix` could not be launched directly from that shell. The RoslynMcp build tool performed SDK discovery independently and successfully built both projects.
+The compiled server and test harness both build successfully under `net10.0`. The full executable harness was then launched with an explicit .NET path, but the child MCP server did not answer the initial `initialize` request within 60 seconds, so no tool calls ran.
 
-### Remaining Focused Tests Before Phase II
+Direct reproduction showed that the server process remained alive, consumed approximately 1.4 GB of memory, and stalled before `ApplicationStarted` or the normal start log. A macOS process sample showed heavy assembly/reflection/JIT activity while the main thread waited. The machine had approximately 11 GB free, so storage pressure was worth addressing but did not explain this specific initialization hang.
 
-- Added path remains absent and is created successfully.
-- Added path appears after preview and is not overwritten.
-- Removed file is backed up and deleted.
-- Removed file changes or disappears after preview.
-- Removing one linked document keeps the physical file.
-- Removing the final linked document deletes the physical file.
-- Mixed add/modify/remove action.
-- Multi-file partial write with exact successful and failed paths.
-- Non-empty incorrect post-write content.
-- Hash-verified truncation recovery success and failure.
-- Unsupported or failing `CodeAction` operations.
+This is currently the last verification blocker. It occurs before a code-fix request reaches preview or apply, so the focused code-fix pipeline has not yet been implicated. The next diagnostic step is to isolate MCP tool discovery/schema registration and determine which registered tool or startup component causes the initialization explosion.
 
 ---
 
 ## Remaining Phase I Work
 
-The targeted feature should stay intentionally smaller than a general transaction system. The next work should focus on making the existing preview/apply pipeline verifiable, easy to recover, and difficult to misuse.
+The safety and persistence items previously listed as must-fix work are implemented. The remaining pre-PR work is finite:
 
-### 1. Exact Post-Write Verification
-
-The current truncation checks detect missing, empty, or extremely short files. They do not prove that a non-empty file contains the complete intended fix.
-
-For each modified or added path, RoslynMcp should calculate:
-
-```text
-Original preview hash
-Intended ChangedSolution hash
-Actual disk hash after apply
-```
-
-The final state can then be classified:
-
-| Actual disk state | Meaning |
-|---|---|
-| Matches intended hash | Successfully written |
-| Matches original hash | Write did not occur |
-| Missing or empty | Missing or truncated |
-| Matches neither | Partial write, interference, or uncertain content |
-
-For a removed file, absence means successful deletion; the original hash means deletion did not occur; and a different existing hash means the file changed unexpectedly.
-
-Truncation self-healing should remain, but a recovered file should count as successful only after its hash matches the intended content. A non-empty unexpected file should not be overwritten automatically because it may contain concurrent user work.
-
-### 2. Clean Partial-Write Results and Recovery Messages
-
-When a multi-file operation fails after some files were already written, the result should identify exact paths instead of returning only an error or aggregate count.
-
-The response should clearly separate:
-
-- Files that reached the intended content
-- Files that were successfully deleted
-- Files that remained unchanged
-- Files whose final content is uncertain
-- The path where the failure occurred, when known
-
-Example:
-
-```json
-{
-  "error": "partial apply",
-  "writtenFiles": ["A.cs", "B.cs"],
-  "deletedFiles": ["OldHelper.cs"],
-  "untouchedFiles": ["D.cs"],
-  "uncertainFiles": ["C.cs"],
-  "failedFile": "C.cs"
-}
-```
-
-Recovery guidance should also be specific:
-
-- Written file: apply its `pre` snapshot to roll back.
-- Deleted file: apply its `pre` snapshot to recreate it.
-- Untouched file: no recovery is needed.
-- Uncertain file: inspect it, then use `pre` to roll back or `post` to restore the intended fix.
-- Newly created file: rollback means deleting it because no pre-existing snapshot exists.
-
-This work is required before Fix All because a project- or solution-wide fix can touch many files and must explain exactly what happened if one operation fails.
-
-### 3. Bind Approval Tokens to Their Original Workspace
-
-A token created from one project or workspace should not be applied through another `projectPath`.
-
-The pending operation should store the canonical workspace identity resolved during preview. Apply should resolve its supplied path to the same canonical identity and reject a mismatch before stale checks, backups, or writes.
-
-The identity should not be the raw input string because several inputs may legitimately resolve to the same workspace:
-
-```text
-/repo
-/repo/App.csproj
-/repo/src/Widget.cs
-```
-
-This protects against mixing a changed solution from workspace A with backup metadata, workspace mode, or invalidation calls from workspace B.
-
-### 4. Harden CodeAction Calculation
-
-The selected action can fail while Roslyn calculates its operations, even if the provider successfully advertised the action.
-
-RoslynMcp should:
-
-- Catch non-cancellation exceptions from `GetOperationsAsync`.
-- Return a clean message containing the diagnostic ID, provider, action title, and failure reason.
-- Allow `OperationCanceledException` to continue through the normal cancellation path.
-- Replace the current `SingleOrDefault` assumption with a clear validation check.
-
-For the first version, RoslynMcp should support exactly one `ApplyChangesOperation`. Zero, multiple, or custom operations should return a structured unsupported-action response rather than throwing or silently ignoring part of the provider's request.
-
-### 5. Handle File-Access Races Cleanly
-
-A file can disappear or become inaccessible between an existence check and the later hash read. Expected `IOException` and `UnauthorizedAccessException` cases during stale validation should return a clean stale/unavailable response instead of escaping as a generic tool failure.
-
-### 6. Complete Focused Integration Coverage
-
-The current tests cover a successful existing-file fix and rejection of a stale modified file. Additional focused tests should cover:
-
-- Added path remains absent and is created.
-- Added path appears after preview and is not overwritten.
-- Removed file is backed up and deleted.
-- Removed file changes or disappears after preview.
-- Removing one linked document keeps the physical file.
-- Removing the final linked document deletes it.
-- Mixed add/modify/remove action.
-- Multi-file failure reports exact successful and failed paths.
-- Non-empty incorrect post-write content.
-- Truncation recovery succeeds only when the final hash matches.
-- Unsupported and failing code actions return clean messages.
-- A token cannot be applied through another workspace.
-
-### 7. Documentation, Validation, and Cleanup
-
-- Update the main README tool table and public tool counts.
-- Document result fields and recovery behavior.
-- Include the code-fix architecture README.
-- Run the full executable test harness.
-- Run `scripts/Test-CodeStyle.ps1 -Fix`.
-- Run Roslyn diagnostics and full builds.
-- Remove `.DS_Store` files and add the pattern to `.gitignore`.
+1. Diagnose and fix the MCP initialization hang.
+2. Run the complete executable harness after initialization works.
+3. Run the repository style auditor when `pwsh` is available.
+4. Review and add the untracked code-fix architecture README.
+5. Remove untracked `.DS_Store` files.
+6. Push the branch and open the first-round PR.
 
 ### Lower-Priority Future Work
 
 The following improvements are useful but should not block the initial targeted feature:
 
-- Three-state approval tokens (`Pending -> Applying -> Consumed`) for retrying verified zero-write failures.
 - A shared `SolutionChangeApplier` used by code fix, rename, and signature-change tools.
-- General-purpose injectable provider/test infrastructure.
+- Controlled support for additional reviewed/bundled providers.
+- Project-system-aware creation, deletion, moves, and `.csproj` edits.
 - Automatic multi-file rollback.
 - Support for executing custom or combining multiple `CodeActionOperation` types rather than rejecting them.
 - Detailed per-file public state models beyond successful and failed paths.
@@ -768,13 +634,13 @@ It should not add a separate file-writing path. Completing Phase I's exact verif
 
 ## Pull Request
 
-**Draft PR:** Not created yet. The active branch and commits are linked above and should be pushed before opening the draft PR.
+**Draft PR:** Not created yet. The local branch contains the completed Phase I hardening commits and should be pushed after the startup blocker is resolved and the full harness passes.
 
 Suggested PR summary:
 
-> Adds targeted Roslyn code-fix preview and apply tools. The preview tool discovers matching `CodeFixProvider` actions for a diagnostic, returns action choices, calculates the selected `ChangedSolution`, and produces an approval token with a unified diff. The apply tool validates affected file states, creates local-history snapshots, applies the reviewed solution, handles final-reference file deletion, and rejects stale previews so concurrent edits are not overwritten. Fix All is intentionally deferred until exact post-write verification and partial multi-file reporting are complete.
+> Adds targeted Roslyn code-fix preview and apply tools using bundled RoslynMcp providers. Preview discovers matching actions, returns choices, calculates the selected solution change, enforces an existing writable in-workspace `.cs`-only boundary, preserves encoding and BOM, and stores exact intended bytes with a workspace-bound approval token. Apply atomically claims the token, creates exact pre/post recovery snapshots, revalidates inside a global apply gate, stages same-directory temporary files, atomically replaces targets, verifies final hashes, and reports per-file outcomes. Creation, deletion, moves, linked/external files, project-system changes, and Fix All are intentionally deferred.
 
-**Status:** Active development; Phase I follow-up validation remains before draft review.
+**Status:** Phase I implementation and focused boundary coverage are complete. Full end-to-end validation remains blocked by the server initialization hang described above.
 
 ---
 
@@ -795,15 +661,15 @@ Suggested PR summary:
 
 The hardest part of this contribution was understanding and defining the problem before writing the code. The issue initially sounded like a single feature—apply Roslyn code fixes—but it crossed diagnostic discovery, provider execution, immutable solutions, approval workflows, backups, physical file safety, partial failures, and future Fix All behavior. I had to separate what Roslyn already provided from what RoslynMcp still needed to own.
 
-Defining the first-version scope required the most judgment. Several ideas were valuable—Fix All, retryable three-state tokens, a shared transaction-style apply engine, automatic rollback, exhaustive linked-file testing, and generalized provider infrastructure—but implementing all of them in Phase I would have made one feature unnecessarily large. I had to decide which work was required for a safe and useful targeted version, which work depended on earlier foundations, and which work should be documented as future improvement.
+Defining the first-version scope required the most judgment. Several ideas were valuable—Fix All, project-system edits, creation and deletion, a shared transaction-style apply engine, automatic rollback, exhaustive linked-file testing, and generalized external-provider infrastructure—but implementing all of them in Phase I would have made one feature unnecessarily large. I had to decide which work was required for a safe and useful targeted version, which work depended on earlier foundations, and which work should be documented as future improvement.
 
-Understanding and planning for the full set of normal cases, failure cases, and edge cases was also difficult. A seemingly simple code fix can modify one file, create a file, delete a file, affect several projects, or operate on multiple Roslyn documents that share one physical path. The workspace can change between preview and apply; a new path can unexpectedly appear; a file intended for deletion can be edited; a multi-file write can fail partway through; a workspace write can leave an empty file; a provider can fail while calculating its action; and an approval token can be retried or submitted through the wrong workspace. Working through these cases was necessary to understand the design, even when some of them were ultimately classified as lower-priority future work rather than Phase I requirements.
+Understanding and planning for the full set of normal cases, failure cases, and edge cases was also difficult. A seemingly simple code fix can modify one file, create or delete files, affect several projects, or operate on multiple Roslyn documents that share one physical path. The final Phase I design handles the safe modification case and rejects the ambiguous cases explicitly. It also accounts for workspace changes between preview and apply, partial multi-file failures, encoding drift, provider failures, cancellation, concurrent token requests, and wrong-workspace approval attempts.
 
 The tricky judgment was not simply identifying every edge case, but deciding how each one should affect the implementation plan. Some cases represented immediate data-safety requirements, such as preventing stale previews from overwriting concurrent edits. Others required small defensive handling, while broader retry, rollback, and generalized operation support could be deferred. This case-by-case prioritization helped keep the first version safe without allowing the feature to grow indefinitely.
 
-The final Phase I boundary prioritized the targeted preview/apply workflow, explicit approval, affected-file stale protection, backups, deletion handling, and focused integration coverage. Exact post-write verification, honest multi-file partial-result reporting, and small action-execution hardening were identified as the remaining completion work. Broader infrastructure and Fix All were deliberately deferred until the targeted pipeline could provide trustworthy physical results.
+The final Phase I boundary prioritizes the targeted preview/apply workflow, bundled providers, explicit approval, existing writable in-workspace `.cs` files, affected-file stale protection, exact-byte backups, encoding preservation, atomic replacement, final hash verification, honest partial-result reporting, and focused boundary coverage. Broader provider loading, project-system edits, add/remove support, and Fix All are deliberately deferred.
 
-The linked-file and disk-state problems were still important technical challenges. A Roslyn `Document` is not always equivalent to one physical file, and a `ChangedSolution` describes intended in-memory state without proving what reached disk. Understanding those distinctions informed the design, but the larger challenge was deciding how much of that complexity had to be solved immediately and in what order.
+The linked-file and disk-state problems were still important technical challenges. A Roslyn `Document` is not always equivalent to one physical file, and a `ChangedSolution` describes intended in-memory state without proving what reached disk. Understanding those distinctions led to an explicit linked-file rejection boundary and a physical plan containing the exact bytes and hashes needed to prove the approved result.
 
 ### What I Would Do Differently
 
