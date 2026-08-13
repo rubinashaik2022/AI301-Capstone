@@ -4,11 +4,12 @@
 **Student:** Rubina Shaik  
 **Issue:** [MadQ/RoslynMcp #110](https://github.com/MadQ/RoslynMcp/issues/110)  
 **Development Branch:** [issue-110-apply-bulk-code-fix](https://github.com/rubinashaik2022/RoslynMcp/tree/issue-110-apply-bulk-code-fix)  
-**Project Status:** Phase I implementation complete; final end-to-end startup verification is blocked by an MCP server initialization hang  
-**Tool Status:** The targeted code-fix workflow now has strict provider, file, workspace, encoding, approval, backup, concurrency, persistence, and partial-failure boundaries. Both projects build successfully and focused boundary tests are implemented.  
-**Delivery Plan:** PR 1 will complete and submit Phase I of the tool. A separate PR 2 will implement Phase II Fix All support after the targeted preview/apply pipeline is fully validated.
+**Project Status:** Phase I completed and submitted for upstream review  
+**Tool Status:** The targeted code-fix workflow is implemented, documented, and verified end to end with 20 focused integration tests in both Adhoc and MSBuild workspace modes.  
+**Pull Request:** [MadQ/RoslynMcp #242 — Phase 1 of Issue 110 apply bulk code fix](https://github.com/MadQ/RoslynMcp/pull/242)  
+**Delivery Plan:** PR #242 submits the completed Phase I targeted workflow. A separate Phase II contribution will add Fix All support at document, project, and solution scope.
 
-> **Development note:** The Phase I safety scope is now deliberately narrow: only bundled RoslynMcp code-fix providers may run, and only existing writable, non-generated `.cs` files inside the resolved workspace may be modified. File creation, deletion, moves, linked or external files, project-system changes, references, additional documents, and analyzer-config changes are rejected. Fix All remains a separate Phase II contribution.
+> **Submission note:** PR #242 is open for review and intentionally does not close Issue #110. Phase I establishes the safe preview, approval, backup, exact-byte persistence, and verification pipeline. Fix All remains Phase II work and should reuse this pipeline rather than introduce a second write path.
 
 ---
 
@@ -521,8 +522,9 @@ The final hardening work added:
 - `1ef7088` - harden the apply pipeline and restrict providers
 - `b4d2e6e` - harden preview boundaries and preserve file encoding
 - `7b603fd` - harden apply concurrency and file persistence
+- `98b1cbd` - complete code-fix coverage and documentation
 
-The local branch is ahead of the remote branch and should be pushed before submitting the first-round PR.
+The completed branch was pushed and submitted to the upstream project as PR #242.
 
 ### Primary Files
 
@@ -535,7 +537,7 @@ The local branch is ahead of the remote branch and should be pushed before submi
 - `src/RoslynMcp/RoslynMcp.csproj`
 - `src/TestHarness/TestHarnessProgram.cs`
 - `src/TestHarness/Tests/CodeFixTests.cs`
-- `src/RoslynMcp/Tools/CodeFix/README.md` (architecture notes, currently local/untracked)
+- `src/RoslynMcp/Tools/CodeFix/README.md`
 
 ---
 
@@ -543,9 +545,12 @@ The local branch is ahead of the remote branch and should be pushed before submi
 
 ### Implemented Integration and Boundary Coverage
 
-- End-to-end MCP preview and apply test for `RMCP001`.
-- Confirms preview returns a token and a diff containing the `nint` replacement.
-- Confirms apply writes the intended change and reports at least one written file.
+- Completed 20 focused end-to-end tests through the MCP stdio transport.
+- Confirms preview returns the expected action, unified diff, and approval token.
+- Confirms apply writes and verifies the exact intended physical bytes.
+- Confirms successful behavior in both AdhocWorkspace and MSBuildWorkspace modes.
+- Uses a real temporary `.csproj` for the MSBuild preview/apply test and verifies the refreshed workspace observes the changed source.
+- Uses two real temporary projects sharing one physical source file to verify linked-file changes are rejected without altering the file.
 - Regression test previews a fix, performs a simulated concurrent edit, applies the old token, and verifies:
   - The result is `stale preview`.
   - The concurrent edit remains byte-for-byte intact.
@@ -557,6 +562,15 @@ The local branch is ahead of the remote branch and should be pushed before submi
 - Verifies the exact intended bytes are used for backup, persistence, and final hash comparison.
 - Covers atomic approval races, partial-result reporting, cancellation propagation, and clean file-access failure reporting.
 
+Final focused result:
+
+```text
+All 20 code-fix tests passed.
+RoslynMcp build succeeded.
+TestHarness build succeeded.
+Roslyn diagnostics: 0 errors, 0 warnings.
+```
+
 ### Static and Build Validation Performed
 
 - Ran `roslyn_get_diagnostics` against the server project: 0 compiler errors and 0 warnings.
@@ -566,26 +580,45 @@ The local branch is ahead of the remote branch and should be pushed before submi
 - The only reported build warnings were `NU1900` warnings because NuGet vulnerability metadata could not be reached from the restricted environment; these were unrelated to source correctness.
 - Reviewed the semantic diff after edits and caught/restored MCP registration attributes that had been removed during an intermediate method replacement.
 
-### End-to-End Harness Blocker
+### End-to-End Verification Completed
 
-The compiled server and test harness both build successfully under `net10.0`. The full executable harness was then launched with an explicit .NET path, but the child MCP server did not answer the initial `initialize` request within 60 seconds, so no tool calls ran.
+The focused harness launched the newly built RoslynMcp server over stdio, completed the MCP `initialize` handshake, called both code-fix tools, applied changes to physical files, and verified the resulting bytes. The complete feature flow was exercised as:
 
-Direct reproduction showed that the server process remained alive, consumed approximately 1.4 GB of memory, and stalled before `ApplicationStarted` or the normal start log. A macOS process sample showed heavy assembly/reflection/JIT activity while the main thread waited. The machine had approximately 11 GB free, so storage pressure was worth addressing but did not explain this specific initialization hang.
+```text
+Start newly built RoslynMcp server
+        -> MCP initialize
+        -> roslyn_preview_code_fix
+        -> review diff and receive approval token
+        -> roslyn_apply_code_fix
+        -> atomically replace the physical source file
+        -> verify exact output bytes and workspace refresh
+```
 
-This is currently the last verification blocker. It occurs before a code-fix request reaches preview or apply, so the focused code-fix pipeline has not yet been implicated. The next diagnostic step is to isolate MCP tool discovery/schema registration and determine which registered tool or startup component causes the initialization explosion.
+All 20 focused code-fix tests passed. This included successful Adhoc operation, successful MSBuildWorkspace operation through a real temporary `.csproj`, linked-file rejection through a real two-project setup, encoding/BOM preservation, stale-file protection, token races, boundary rejection, and exact physical-result reporting.
+
+The earlier initialization failure was isolated to the .NET generic host's automatic configuration reload watcher on the macOS test environment. The same behavior reproduced on the base `dev` branch, proving it was unrelated to this feature. Launching the test server with `DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false` bypassed that environment-specific watcher and allowed the full focused MCP workflow to complete.
 
 ---
 
-## Remaining Phase I Work
+## Phase I Completion Status
 
-The safety and persistence items previously listed as must-fix work are implemented. The remaining pre-PR work is finite:
+Phase I is complete and submitted for review. The final delivery included:
 
-1. Diagnose and fix the MCP initialization hang.
-2. Run the complete executable harness after initialization works.
-3. Run the repository style auditor when `pwsh` is available.
-4. Review and add the untracked code-fix architecture README.
-5. Remove untracked `.DS_Store` files.
-6. Push the branch and open the first-round PR.
+1. Two public MCP tools for targeted code-fix preview and apply.
+2. A closed catalog of bundled and reviewed providers.
+3. Modification-only safety boundaries for existing writable, non-generated, unlinked in-workspace `.cs` files.
+4. Strict solution-change and `CodeActionOperation` validation.
+5. Workflow- and workspace-bound approval tokens with atomic claiming.
+6. Stale-state protection before and immediately prior to physical replacement.
+7. Exact encoding and BOM preservation.
+8. Exact pre/post recovery snapshots.
+9. Same-directory temporary-file staging and atomic replacement.
+10. SHA-256 verification and per-file recovery reporting.
+11. Twenty passing focused MCP integration tests, including real MSBuild coverage.
+12. Updated public tool counts/catalog and dedicated architecture documentation.
+13. A pushed final branch and open upstream PR #242.
+
+The PowerShell style auditor could not be run because `pwsh` was unavailable. Both projects nevertheless built successfully and Roslyn diagnostics reported zero errors and zero warnings. The remaining build warnings were unrelated `NU1900` warnings caused by unavailable NuGet vulnerability metadata.
 
 ### Lower-Priority Future Work
 
@@ -634,13 +667,13 @@ It should not add a separate file-writing path. Completing Phase I's exact verif
 
 ## Pull Request
 
-**Draft PR:** Not created yet. The local branch contains the completed Phase I hardening commits and should be pushed after the startup blocker is resolved and the full harness passes.
+**PR:** [#242 — Phase 1 of Issue 110 apply bulk code fix](https://github.com/MadQ/RoslynMcp/pull/242)  
+**Status:** Open and submitted for upstream review  
+**Final submitted commit:** [`98b1cbd` — Complete code-fix coverage and documentation](https://github.com/rubinashaik2022/RoslynMcp/commit/98b1cbd)
 
-Suggested PR summary:
+The PR explains the Phase I scope and major design decisions, including separate preview/apply operations, calculation of the action only once, exact-byte persistence rather than diff replay, bundled-provider restrictions, modification-only `.cs` boundaries, workspace-bound approval tokens, stale-file rejection, encoding/BOM preservation, exact recovery snapshots, atomic replacement, and verified per-file outcomes.
 
-> Adds targeted Roslyn code-fix preview and apply tools using bundled RoslynMcp providers. Preview discovers matching actions, returns choices, calculates the selected solution change, enforces an existing writable in-workspace `.cs`-only boundary, preserves encoding and BOM, and stores exact intended bytes with a workspace-bound approval token. Apply atomically claims the token, creates exact pre/post recovery snapshots, revalidates inside a global apply gate, stages same-directory temporary files, atomically replaces targets, verifies final hashes, and reports per-file outcomes. Creation, deletion, moves, linked/external files, project-system changes, and Fix All are intentionally deferred.
-
-**Status:** Phase I implementation and focused boundary coverage are complete. Full end-to-end validation remains blocked by the server initialization hang described above.
+The PR is intentionally described as a partial implementation of Issue #110 rather than using `Closes` or `Fixes`. Phase II Fix All support remains outstanding.
 
 ---
 
